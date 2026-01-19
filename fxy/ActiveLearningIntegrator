@@ -1,0 +1,511 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+from torch.utils.data import Dataset, DataLoader
+import matplotlib.pyplot as plt
+from scipy import integrate
+from tqdm import tqdm
+import warnings
+warnings.filterwarnings('ignore')
+
+# 设置随机种子保证可复现性
+torch.manual_seed(42)
+np.random.seed(42)
+
+# ==================== 1. 定义神经网络模型 ====================
+
+class MLP(nn.Module):
+    """基础多层感知机"""
+    def __init__(self, input_dim=2, hidden_dim=50, output_dim=1, num_layers=3):
+        super(MLP, self).__init__()
+        layers = []
+        layers.append(nn.Linear(input_dim, hidden_dim))
+        layers.append(nn.ReLU())
+        
+        for _ in range(num_layers - 2):
+            layers.append(nn.Linear(hidden_dim, hidden_dim))
+            layers.append(nn.ReLU())
+        
+        layers.append(nn.Linear(hidden_dim, output_dim))
+        self.net = nn.Sequential(*layers)
+    
+    def forward(self, x):
+        return self.net(x)
+
+
+class FourierNet(nn.Module):
+    """傅里叶特征网络，适合周期性函数"""
+    def __init__(self, input_dim=2, hidden_dim=50, output_dim=1, num_fourier=10):
+        super(FourierNet, self).__init__()
+        self.fourier_b = nn.Parameter(torch.randn(input_dim, num_fourier) * 2)
+        
+        self.net = nn.Sequential(
+            nn.Linear(2 * num_fourier, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, output_dim)
+        )
+    
+    def forward(self, x):
+        # 傅里叶特征变换
+        fourier_features = torch.cat([
+            torch.sin(2 * np.pi * x @ self.fourier_b),
+            torch.cos(2 * np.pi * x @ self.fourier_b)
+        ], dim=-1)
+        return self.net(fourier_features)
+
+
+class ResidualNet(nn.Module):
+    """残差网络"""
+    def __init__(self, input_dim=2, hidden_dim=50, output_dim=1, num_blocks=3):
+        super(ResidualNet, self).__init__()
+        
+        self.input_layer = nn.Linear(input_dim, hidden_dim)
+        self.blocks = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim)
+            ) for _ in range(num_blocks)
+        ])
+        self.output_layer = nn.Linear(hidden_dim, output_dim)
+        self.activation = nn.ReLU()
+    
+    def forward(self, x):
+        x = self.activation(self.input_layer(x))
+        for block in self.blocks:
+            residual = x
+            x = self.activation(block(x) + residual)
+        return self.output_layer(x)
+
+
+class SirenNet(nn.Module):
+    """SIREN网络，适合高频细节"""
+    def __init__(self, input_dim=2, hidden_dim=50, output_dim=1, num_layers=3, w0=30.0):
+        super(SirenNet, self).__init__()
+        
+        layers = []
+        # 第一层
+        layers.append(nn.Linear(input_dim, hidden_dim))
+        layers.append(SineActivation(w0=w0))
+        
+        # 中间层
+        for _ in range(num_layers - 2):
+            layers.append(nn.Linear(hidden_dim, hidden_dim))
+            layers.append(SineActivation(w0=w0))
+        
+        # 输出层
+        layers.append(nn.Linear(hidden_dim, output_dim))
+        self.net = nn.Sequential(*layers)
+    
+    def forward(self, x):
+        return self.net(x)
+
+
+class SineActivation(nn.Module):
+    """正弦激活函数"""
+    def __init__(self, w0=30.0):
+        super(SineActivation, self).__init__()
+        self.w0 = w0
+    
+    def forward(self, x):
+        return torch.sin(self.w0 * x)
+
+
+class WideNet(nn.Module):
+    """宽网络"""
+    def __init__(self, input_dim=2, hidden_dim=100, output_dim=1, num_layers=2):
+        super(WideNet, self).__init__()
+        layers = []
+        layers.append(nn.Linear(input_dim, hidden_dim))
+        layers.append(nn.ReLU())
+        
+        for _ in range(num_layers - 2):
+            layers.append(nn.Linear(hidden_dim, hidden_dim))
+            layers.append(nn.ReLU())
+        
+        layers.append(nn.Linear(hidden_dim, output_dim))
+        self.net = nn.Sequential(*layers)
+    
+    def forward(self, x):
+        return self.net(x)
+
+
+# ==================== 2. 定义主动学习器 ====================
+
+class ActiveLearningIntegrator:
+    def __init__(self, target_function, domain, Ln=1000, S0=100, St=50, m=10):
+        """
+        参数:
+        - target_function: 目标函数 f(x, y)
+        - domain: 积分域 [(x_min, x_max), (y_min, y_max)]
+        - Ln: 总点数
+        - S0: 初始数据集大小
+        - St: 每轮主动学习添加的点数
+        - m: 最大迭代轮数
+        """
+        self.func = target_function
+        self.domain = domain
+        self.Ln = Ln
+        self.S0 = S0
+        self.St = St
+        self.m = m
+        
+        # 生成所有点
+        self.all_points = self.generate_points(Ln)
+        
+        # 初始化五个不同的神经网络
+        self.models = [
+            MLP(input_dim=2, hidden_dim=64, output_dim=1, num_layers=4),
+            FourierNet(input_dim=2, hidden_dim=64, output_dim=1, num_fourier=10),
+            ResidualNet(input_dim=2, hidden_dim=64, output_dim=1, num_blocks=3),
+            SirenNet(input_dim=2, hidden_dim=64, output_dim=1, num_layers=4, w0=30.0),
+            WideNet(input_dim=2, hidden_dim=128, output_dim=1, num_layers=3)
+        ]
+        
+        # 存储训练数据
+        self.train_points = None
+        self.train_values = None
+        
+        # 存储历史信息
+        self.history = {
+            'points_added': [],
+            'variances': [],
+            'losses': [],
+            'integral_estimates': []
+        }
+    
+    def generate_points(self, num_points):
+        """在积分域内生成均匀分布的随机点"""
+        x_min, x_max = self.domain[0]
+        y_min, y_max = self.domain[1]
+        
+        points_x = torch.rand(num_points) * (x_max - x_min) + x_min
+        points_y = torch.rand(num_points) * (y_max - y_min) + y_min
+        return torch.stack([points_x, points_y], dim=1)
+    
+    def compute_exact_values(self, points):
+        """计算点的精确函数值"""
+        values = []
+        for point in points:
+            x, y = point[0].item(), point[1].item()
+            values.append(self.func(x, y))
+        return torch.tensor(values, dtype=torch.float32).unsqueeze(1)
+    
+    def initialize_dataset(self):
+        """初始化数据集"""
+        # 随机选择S0个点
+        indices = torch.randperm(self.Ln)[:self.S0]
+        initial_points = self.all_points[indices]
+        initial_values = self.compute_exact_values(initial_points)
+        
+        self.train_points = initial_points
+        self.train_values = initial_values
+        
+        print(f"初始化数据集: {self.S0}个点")
+        return indices
+    
+    def train_models(self, num_epochs=500, batch_size=32):
+        """训练所有神经网络模型"""
+        losses = []
+        
+        # 创建数据集
+        dataset = torch.utils.data.TensorDataset(self.train_points, self.train_values)
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        
+        for model in self.models:
+            model.train()
+            optimizer = optim.Adam(model.parameters(), lr=0.001)
+            criterion = nn.MSELoss()
+            
+            epoch_losses = []
+            for epoch in range(num_epochs):
+                epoch_loss = 0
+                for batch_points, batch_values in dataloader:
+                    optimizer.zero_grad()
+                    predictions = model(batch_points)
+                    loss = criterion(predictions, batch_values)
+                    loss.backward()
+                    optimizer.step()
+                    epoch_loss += loss.item()
+                
+                epoch_losses.append(epoch_loss / len(dataloader))
+                
+                # 早停机制
+                if epoch > 100 and np.mean(epoch_losses[-10:]) - np.mean(epoch_losses[-20:-10]) > 0:
+                    break
+            
+            losses.append(epoch_losses[-1])
+        
+        return np.mean(losses)
+    
+    def compute_variances(self):
+        """在所有点上计算不同模型预测的方差"""
+        all_predictions = []
+        
+        for model in self.models:
+            model.eval()
+            with torch.no_grad():
+                predictions = model(self.all_points)
+                all_predictions.append(predictions)
+        
+        # 计算方差
+        predictions_tensor = torch.stack(all_predictions, dim=0)  # [num_models, Ln, 1]
+        variances = predictions_tensor.var(dim=0).squeeze()  # [Ln]
+        
+        return variances.numpy()
+    
+    def select_new_points(self, variances):
+        """选择方差最大的St个点"""
+        # 排除已经训练过的点
+        trained_indices = []
+        for i in range(self.Ln):
+            point = self.all_points[i]
+            for train_point in self.train_points:
+                if torch.allclose(point, train_point, atol=1e-6):
+                    trained_indices.append(i)
+                    break
+        
+        # 将已训练点的方差设为-1，确保不会被选中
+        mask = np.ones(self.Ln, dtype=bool)
+        mask[trained_indices] = False
+        masked_variances = variances.copy()
+        masked_variances[~mask] = -1
+        
+        # 选择方差最大的St个点
+        new_indices = np.argsort(masked_variances)[-self.St:]
+        
+        # 如果可用的点少于St个，随机选择剩余点
+        if len(new_indices) < self.St:
+            remaining_indices = np.where(mask)[0]
+            new_indices = np.concatenate([
+                new_indices,
+                np.random.choice(remaining_indices, self.St - len(new_indices), replace=False)
+            ])
+        
+        return torch.tensor(new_indices, dtype=torch.long)
+    
+    def active_learning_cycle(self):
+        """执行主动学习循环"""
+        # 初始化数据集
+        self.initialize_dataset()
+        
+        # 训练初始模型
+        initial_loss = self.train_models(num_epochs=300)
+        print(f"初始训练损失: {initial_loss:.6f}")
+        
+        # 主循环
+        for cycle in range(self.m):
+            print(f"\n=== 主动学习循环 {cycle + 1}/{self.m} ===")
+            
+            # 计算方差
+            variances = self.compute_variances()
+            self.history['variances'].append(variances)
+            
+            # 选择新点
+            new_indices = self.select_new_points(variances)
+            new_points = self.all_points[new_indices]
+            new_values = self.compute_exact_values(new_points)
+            
+            # 添加新点到训练集
+            self.train_points = torch.cat([self.train_points, new_points], dim=0)
+            self.train_values = torch.cat([self.train_values, new_values], dim=0)
+            
+            print(f"添加 {len(new_points)} 个新点")
+            print(f"当前训练集大小: {len(self.train_points)}")
+            
+            # 重新训练模型
+            loss = self.train_models(num_epochs=200)
+            self.history['losses'].append(loss)
+            print(f"训练损失: {loss:.6f}")
+            
+            # 计算积分估计
+            integral_estimate = self.estimate_integral()
+            self.history['integral_estimates'].append(integral_estimate)
+            print(f"积分估计: {integral_estimate:.6f}")
+            
+            # 检查收敛
+            if len(self.history['integral_estimates']) > 3:
+                recent = self.history['integral_estimates'][-3:]
+                if max(recent) - min(recent) < 0.01 * abs(np.mean(recent)):
+                    print(f"提前收敛于第 {cycle + 1} 轮")
+                    break
+        
+        print("\n=== 主动学习完成 ===")
+        print(f"最终训练集大小: {len(self.train_points)}")
+        print(f"总查询点数: {len(self.train_points)}")
+    
+    def estimate_integral(self):
+        """使用神经网络估计积分"""
+        all_predictions = []
+        
+        for model in self.models:
+            model.eval()
+            with torch.no_grad():
+                predictions = model(self.all_points)
+                all_predictions.append(predictions)
+        
+        # 使用所有模型的平均预测
+        avg_predictions = torch.mean(torch.stack(all_predictions), dim=0)
+        
+        # 计算积分（蒙特卡洛方法）
+        x_range = self.domain[0][1] - self.domain[0][0]
+        y_range = self.domain[1][1] - self.domain[1][0]
+        area = x_range * y_range
+        
+        integral = torch.mean(avg_predictions) * area
+        
+        return integral.item()
+    
+    def compute_exact_integral(self, n_samples=1000000):
+        """使用蒙特卡洛方法计算精确积分（参考）"""
+        x_min, x_max = self.domain[0]
+        y_min, y_max = self.domain[1]
+        
+        x_samples = np.random.uniform(x_min, x_max, n_samples)
+        y_samples = np.random.uniform(y_min, y_max, n_samples)
+        
+        values = []
+        for x, y in zip(x_samples, y_samples):
+            values.append(self.func(x, y))
+        
+        area = (x_max - x_min) * (y_max - y_min)
+        integral = np.mean(values) * area
+        
+        return integral
+    
+    def get_all_predictions(self):
+        """获取所有点的最终预测值"""
+        all_predictions = []
+        
+        for model in self.models:
+            model.eval()
+            with torch.no_grad():
+                predictions = model(self.all_points)
+                all_predictions.append(predictions)
+        
+        # 计算平均值和标准差
+        predictions_tensor = torch.stack(all_predictions, dim=0)
+        mean_predictions = predictions_tensor.mean(dim=0).squeeze()
+        std_predictions = predictions_tensor.std(dim=0).squeeze()
+        
+        return {
+            'points': self.all_points,
+            'mean_predictions': mean_predictions,
+            'std_predictions': std_predictions,
+            'all_predictions': predictions_tensor
+        }
+    
+    def plot_results(self):
+        """可视化结果"""
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        
+        # 1. 损失曲线
+        axes[0, 0].plot(self.history['losses'])
+        axes[0, 0].set_xlabel('rounds')
+        axes[0, 0].set_ylabel('losses')
+        axes[0, 0].set_title('losses')
+        axes[0, 0].grid(True)
+        
+        # 2. 积分估计收敛
+        axes[0, 1].plot(self.history['integral_estimates'], marker='o')
+        axes[0, 1].axhline(y=self.compute_exact_integral(n_samples=50000), 
+                          color='r', linestyle='--', label='reference')
+        axes[0, 1].set_xlabel('rounds')
+        axes[0, 1].set_ylabel('integral_estimates')
+        axes[0, 1].set_title('integral_estimates')
+        axes[0, 1].legend()
+        axes[0, 1].grid(True)
+        
+        # 3. 预测方差分布
+        if self.history['variances']:
+            final_variances = self.history['variances'][-1]
+            axes[1, 0].hist(final_variances, bins=50, alpha=0.7)
+            axes[1, 0].set_xlabel('variances')
+            axes[1, 0].set_ylabel('频数')
+            axes[1, 0].set_title('variances')
+            axes[1, 0].grid(True)
+        
+        # 4. 训练点分布
+        train_points = self.train_points.numpy()
+        axes[1, 1].scatter(train_points[:, 0], train_points[:, 1], 
+                          s=10, alpha=0.5, label='train_points')
+        axes[1, 1].set_xlabel('x')
+        axes[1, 1].set_ylabel('y')
+        axes[1, 1].set_title(f'train_points ({len(train_points)})')
+        axes[1, 1].legend()
+        axes[1, 1].grid(True)
+        
+        plt.tight_layout()
+        plt.show()
+
+
+# ==================== 3. 测试函数 ====================
+
+def test_function_1(x, y):
+    """简单的测试函数"""
+    return np.sin(x) * np.cos(y) + 0.1 * (x**2 + y**2)
+
+def test_function_2(x, y):
+    """复杂的测试函数"""
+    return np.sin(2*x + y) * np.cos(x - y) + 0.05 * np.exp(-0.1*(x**2 + y**2))
+
+def test_function_3(x, y):
+    """高频振荡函数"""
+    return np.sin(10*x) * np.cos(8*y) + 0.5 * np.sin(5*x*y)
+
+# ==================== 4. 使用示例 ====================
+
+if __name__ == "__main__":
+    # 选择测试函数
+    target_func = test_function_2
+    
+    # 定义积分域
+    domain = [(-2, 2), (-2, 2)]  # x∈[-2,2], y∈[-2,2]
+    
+    # 创建主动学习积分器
+    integrator = ActiveLearningIntegrator(
+        target_function=target_func,
+        domain=domain,
+        Ln=2000,    # 总点数
+        S0=100,     # 初始点数
+        St=30,      # 每轮添加点数
+        m=15        # 最大轮次
+    )
+    
+    # 执行主动学习
+    print("开始主动学习...")
+    integrator.active_learning_cycle()
+    
+    # 获取最终结果
+    results = integrator.get_all_predictions()
+    final_integral = integrator.estimate_integral()
+    
+    # 计算参考积分值
+    reference_integral = integrator.compute_exact_integral(n_samples=100000)
+    
+    print(f"\n=== 最终结果 ===")
+    print(f"最终积分估计: {final_integral:.6f}")
+    print(f"参考积分值: {reference_integral:.6f}")
+    print(f"相对误差: {abs(final_integral - reference_integral)/abs(reference_integral)*100:.2f}%")
+    print(f"总查询点数: {len(integrator.train_points)}")
+    print(f"查询比例: {len(integrator.train_points)/integrator.Ln*100:.1f}%")
+    
+    # 可视化结果
+    integrator.plot_results()
+    
+    # 打印每个点的预测信息（示例：前10个点）
+    print(f"\n=== 前10个点的预测 ===")
+    points = results['points'][:10]
+    mean_preds = results['mean_predictions'][:10]
+    std_preds = results['std_predictions'][:10]
+    
+    for i, (point, mean, std) in enumerate(zip(points, mean_preds, std_preds)):
+        exact = target_func(point[0].item(), point[1].item())
+        print(f"点 {i}: ({point[0]:.3f}, {point[1]:.3f})")
+        print(f"  预测值: {mean:.6f} ± {std:.6f}")
+        print(f"  精确值: {exact:.6f}")
+        print(f"  误差: {abs(mean - exact):.6f}")
+        print()

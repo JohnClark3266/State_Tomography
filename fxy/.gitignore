@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+
+# Data
+*.npz
+*.pt
+*.pth
+
+# Environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# System
+.DS_Store
