@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+    <title>State Tomography & Active Learning</title>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.0.4/reset.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.0.4/reveal.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.0.4/theme/black.min.css">
+    <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.0.4/plugin/highlight/monokai.min.css">
+
+    <style>
+        .reveal h1,
+        .reveal h2,
+        .reveal h3 {
+            text-transform: none;
+            margin-bottom: 0.2em;
+            /* Decreased margin */
+        }
+
+        .reveal p,
+        .reveal ul,
+        .reveal ol {
+            font-size: 18px;
+            /* Reduced base font size */
+            text-align: left;
+            line-height: 1.3;
+        }
+
+        .reveal li {
+            margin-bottom: 5px;
+            /* Tighter lists */
+        }
+
+        .reveal h4 {
+            font-size: 24px;
+            color: #ddd;
+            margin-bottom: 10px;
+        }
+
+        .two-col {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 20px;
+        }
+
+        .col {
+            flex: 1;
+        }
+
+        .math-block {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 5px;
+            /* Reduced padding */
+            border-radius: 8px;
+            margin: 5px 0;
+            /* Reduced margin */
+            text-align: center;
+            font-size: 0.8em;
+            /* Smaller math */
+        }
+
+        .img-gallery {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            align-items: flex-start;
+        }
+
+        .img-gallery figure {
+            margin: 0;
+            text-align: center;
+        }
+
+        .img-gallery img {
+            height: 160px;
+            /* Force smaller images */
+            border: 2px solid #555;
+            border-radius: 5px;
+        }
+
+        .img-gallery figcaption {
+            font-size: 14px;
+            color: cyan;
+            margin-top: 5px;
+            line-height: 1.2;
+        }
+
+        /* Layout fixes for dense slides */
+        .reveal .slides>section {
+            padding: 20px 0;
+            /* Minimal padding */
+            height: 100%;
+        }
+
+        .content-box {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            /* Ensure top align */
+        }
+
+        /* Specific adjustments for images */
+        .demo-plot {
+            max-height: 300px !important;
+        }
+
+        /* Ultra-compact mode for ML slide */
+        .compact-slide h4 {
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+
+        .compact-slide .math-block {
+            margin: 6px 0;
+            padding: 8px;
+        }
+
+        .compact-slide .math-block strong {
+            font-size: 18px;
+        }
+
+        .compact-slide .math-block span {
+            font-size: 16px;
+        }
+
+        .compact-slide .math-block div {
+            margin-top: 0px;
+            margin-bottom: 0px;
+        }
+
+        /* Vertical spread for balanced whitespace */
+        .compact-slide .two-col {
+            height: 90%;
+            align-content: space-between;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="reveal">
+        <div class="slides">
+
+            <!-- Title -->
+            <section>
+                <h2>State Tomography & Active Learning</h2>
+                <h3>in Superconducting Quantum Systems</h3>
+                <p style="text-align: center; margin-top: 50px; color: cyan; font-size: 30px;">
+                    Theory, Implementation & Optimization
+                </p>
+            </section>
+
+            <!-- 1. Significance & Principle -->
+            <section>
+                <h3>1. State Tomography: 意义与原理</h3>
+                <div class="two-col">
+                    <div class="col" style="flex: 0.8;">
+                        <h4>Why State Tomography?</h4>
+                        <ul>
+                            <li><strong>目标</strong>: 重构未知的量子态密度矩阵 $\rho$。</li>
+                            <li><strong>重要性</strong>:
+                                <ul>
+                                    <li><strong>Gate Fidelity</strong>: 验证逻辑门操作精度</li>
+                                    <li><strong>QEC</strong>: 纠错编码校准与错误诊断</li>
+                                    <li><strong>Verification</strong>: 验证纠缠与非经典性</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="col" style="flex: 1.2;">
+                        <h4>原理: 密度矩阵重构</h4>
+                        <p>量子态完全由 $\rho$ 描述。对于单 Qubit:</p>
+                        <div class="math-block">
+                            $$ \rho = \frac{1}{2} (I + \vec{r} \cdot \vec{\sigma}) = \frac{1}{2} \begin{pmatrix}
+                            1+\langle Z\rangle & \langle X\rangle-i\langle Y\rangle \\ \langle X\rangle+i\langle
+                            Y\rangle & 1-\langle Z\rangle \end{pmatrix} $$
+                        </div>
+                        <p><strong>极大似然估计 (MLE)</strong>:</p>
+                        <p>因实验噪声，直接线性反演可能产生非物理态 ($\lambda_i < 0$)。MLE 寻找最可能的合法态：</p>
+                                <div class="math-block" style="font-size: 0.8em;">
+                                    $$ \rho_{\text{MLE}} = \underset{\rho \ge 0, \text{Tr}(\rho)=1}{\text{argmax}}
+                                    \mathcal{L}(\rho | \{M_i\}) $$
+                                </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 2. Wigner Function -->
+            <section>
+                <h3>2. Wigner Function: 相空间可视化</h3>
+                <div class="content-box">
+                    <div class="math-block" style="margin-top: 0;">
+                        物理定义: 准概率分布 (Quasi-probability Distribution)
+                        $$ W(x,p) = \frac{1}{\pi} \int_{-\infty}^{\infty} e^{2ipy} \langle x-y | \rho | x+y \rangle dy
+                        $$
+                    </div>
+
+                    <div class="img-gallery">
+                        <figure>
+                            <img src="images/wigner_coherent.png" alt="Coherent State">
+                            <figcaption>Coherent State $|\alpha\rangle$<br>(经典类高斯包络)</figcaption>
+                        </figure>
+                        <figure>
+                            <img src="images/wigner_cat.png" alt="Cat State">
+                            <figcaption>Cat State $|\alpha\rangle+|-\alpha\rangle$<br>(中间出现干涉条纹)</figcaption>
+                        </figure>
+                        <figure>
+                            <img src="images/wigner_fock3.png" alt="Fock State">
+                            <figcaption>Fock State $|3\rangle$<br>(同心圆环，负值区域)</figcaption>
+                        </figure>
+                    </div>
+
+                    <p style="margin-top: 15px; font-size: 18px;">
+                        <strong>物理意义</strong>: $W(x,p) < 0$ 的区域是<strong>非经典性 (Non-classicality)</strong> 的直接指纹。知道 Wigner
+                            函数等价于知道密度矩阵 $\rho$。
+                    </p>
+                </div>
+            </section>
+
+            <!-- 3. Superconducting Implementation -->
+            <section>
+                <h3>3. 超导量子系统中的实现</h3>
+                <div class="two-col">
+                    <div class="col">
+                        <h4>系统架构</h4>
+                        <ul style="font-size: 18px;">
+                            <li><strong>Cavity (存储)</strong>: 高 Q 值模式</li>
+                            <li><strong>Qubit (探针)</strong>: 辅助测量</li>
+                            <li><strong>Dispersive Interaction</strong>: $\chi a^\dagger a \sigma_z$</li>
+                        </ul>
+
+                        <h4>Direct Wigner Tomography</h4>
+                        <div class="math-block">
+                            $$ W(\alpha) = \frac{2}{\pi} \text{Tr}[ D^\dagger(\alpha) \rho D(\alpha) \Pi ] $$
+                        </div>
+                        <p style="font-size: 16px; margin-top: 5px;">
+                            核心: 测量相空间位置 $\alpha$ 处的<strong>宇称 (Parity) $\Pi$</strong>
+                        </p>
+                        <div
+                            style="font-size: 16px; margin-top: 10px; color: #ddd; background: rgba(0,0,0,0.3); padding: 5px; border-radius: 5px;">
+                            <strong>Why?</strong>
+                            $$ \Pi(\alpha) = D(\alpha) \Pi D^\dagger(\alpha) $$
+                            相空间平移后的宇称算符期望值对应于 Wigner 函数在该点的值：
+                            $$ W(\alpha) = \frac{2}{\pi} \langle \Pi(\alpha) \rangle $$
+                        </div>
+                    </div>
+                    <div class="col">
+                        <h4>实验脉冲序列 (Pulse Sequence)</h4>
+                        <ol style="font-size: 18px;">
+                            <li><strong>Displace</strong>:
+                                <br>对腔施加高斯脉冲 -> $D(-\alpha)$
+                            </li>
+                            <li><strong>Parity Measurement (Ramsey)</strong>:
+                                <br>利用 Qubit 测量腔光子数奇偶性 $\langle \Pi \rangle = \langle (-1)^n \rangle$
+                                <br>
+                                <code
+                                    style="color: yellow; font-size: 16px;">Qubit X90 -> Delay(1/2χ) -> Qubit X90 -> Readout</code>
+                            </li>
+                        </ol>
+                        <div
+                            style="background: #333; padding: 10px; border-radius: 5px; margin-top: 10px; font-size: 16px;">
+                            通过遍历 $\alpha$ (Raster Scan)，点对点测量重构整个 $W(x,p)$。时间成本 $O(N^2)$。
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 4. Challenges & ML Optimization -->
+            <section class="compact-slide">
+                <h3>4. 实验挑战与 Machine Learning</h3>
+
+                <div class="two-col">
+                    <div class="col">
+                        <h4 style="color: #ffaaaa; font-size: 24px;">Experimental Problems (Math)</h4>
+
+                        <div class="math-block" style="text-align: left; padding: 10px;">
+                            <strong style="color: cyan; font-size: 18px;">1. Sampling Complexity</strong><br>
+                            <span style="font-size: 16px;">Full tomography requires $O(d^4)$ or $O(1/\epsilon^2)$
+                                measurements.</span>
+                            <div style="text-align: center;">$$ N_{meas} \gg \text{dim}(\mathcal{H})^2 $$</div>
+                        </div>
+
+                        <div class="math-block" style="text-align: left; padding: 10px;">
+                            <strong style="color: cyan; font-size: 18px;">2. Noise & Drift</strong><br>
+                            <span style="font-size: 16px;">Data isn't static.</span>
+                            <div style="text-align: center;">$$ y(t) = \text{Tr}(\rho \Pi_x) + \xi(t) +
+                                \delta(t)_{\text{drift}} $$</div>
+                        </div>
+
+                        <div class="math-block" style="text-align: left; padding: 10px;">
+                            <strong style="color: cyan; font-size: 18px;">3. Non-Physicality</strong><br>
+                            <span style="font-size: 16px;">Linear inversion yields $\rho$ with:</span>
+                            <div style="text-align: center;">$$ \lambda_{min}(\rho_{inv}) < 0 \quad (\text{Not PSD})
+                                    $$</div>
+                            </div>
+                        </div>
+
+                        <div class="col">
+                            <h4 style="color: #aaffaa; font-size: 24px;">ML Solutions</h4>
+
+                            <div class="math-block" style="text-align: left; padding: 10px;">
+                                <strong style="color: yellow; font-size: 18px;">1. Active Learning (稀疏采样)</strong><br>
+                                <span style="font-size: 16px;">Query points with max uncertainty.</span>
+                                <div style="text-align: center;">$$ x^* = \underset{x}{\text{argmax}} \ \text{Var}[
+                                    \mathcal{M}_{\theta}(x) ] $$</div>
+                            </div>
+
+                            <div class="math-block" style="text-align: left; padding: 10px;">
+                                <strong style="color: yellow; font-size: 18px;">2. Supervised Denoising</strong><br>
+                                <span style="font-size: 16px;">Train NN to map noisy traces to state.</span>
+                                <div style="text-align: center;">$$ \theta^* = \underset{\theta}{\text{argmin}} \
+                                    \mathbb{E}[ || f_\theta(y) - \rho_{true} ||^2 ] $$</div>
+                            </div>
+
+                            <div class="math-block" style="text-align: left; padding: 10px;">
+                                <strong style="color: yellow; font-size: 18px;">3. Neural Density Operators</strong><br>
+                                <span style="font-size: 16px;">Parameterize using Cholesky factor $L$.</span>
+                                <div style="text-align: center;">$$ \rho_{\theta} = \frac{L_\theta^\dagger
+                                    L_\theta}{\text{Tr}(L_\theta^\dagger L_\theta)} \ge 0 $$</div>
+                            </div>
+                        </div>
+                    </div>
+            </section>
+
+            <!-- Q&A -->
+            <section>
+                <h1>Q & A</h1>
+                <p>Thanks for your attention.</p>
+            </section>
+
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.0.4/reveal.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.0.4/plugin/notes/notes.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.0.4/plugin/markdown/markdown.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.0.4/plugin/highlight/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.0.4/plugin/math/math.min.js"></script>
+    <script>
+        Reveal.initialize({
+            hash: true,
+            slideNumber: true,
+            center: false, // Top align content to maximize space
+            width: 1280,
+            height: 780, // User-specified height
+            transition: 'none',
+            plugins: [RevealMarkdown, RevealHighlight, RevealNotes, RevealMath.KaTeX]
+        });
+    </script>
+</body>
+
+</html>

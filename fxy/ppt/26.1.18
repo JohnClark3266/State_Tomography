@@ -1,0 +1,113 @@
+# 超导量子系统中的量子态层析 (Quantum State Tomography, QST)
+*小组会议报告 - 2026.01.18*
+
+---
+
+## 1. 报告大纲 (Outline)
+1. **背景与物理图像**: 什么是态层析？为什么需要它？
+2. **超导量子系统中的实现**: Wigner Function 与 Homodyne Detection
+3. **传统方法的挑战**: 指数级复杂度与噪声
+4. **机器学习的增强作用**: 
+    - 神经网络量子态重构 (NN-QST)
+    - **主动学习 (Active Learning)**  <-- *结合我们刚才的仿真*
+5. **总结与展望**
+
+---
+
+## 2. 什么是量子态层析？(Introduction)
+
+### 物理定义
+- **目标**: 通过测量重构出未知的量子态密度矩阵 $\rho$。
+- **类比**:
+    - **经典**: 抛硬币，统计正反面概率推断硬币的偏重。
+    - **医学**: CT扫描 (Computed Tomography) 通过多角度X光重构人体3D结构。
+    - **量子**: 态层析 (Quantum State Tomography) 通过多基底测量重构量子态信息。
+
+### 应用场景
+- **门保真度验证 (Fidelity Benchmarking)**: 验证量子门操作是否准确。
+- **纠错码校准 (QEC Calibration)**: 检测纠错逻辑态的错误症候。
+- **基础物理研究**: 验证纠缠态 (Entanglement) 和非经典性 (Non-classicality)。
+
+---
+
+## 3. 物理图像与原理 (Physics & Principles)
+
+### 核心数学
+- 对于一个量子态 $|\psi\rangle$ 或混合态 $\rho$，我们需要测量一组完备的算符 (POVM)。
+- 对于 Qubit 系统: 测量 Pauli 算符 $\{I, X, Y, Z\}^{\otimes N}$。
+- 对于 玻色模式 (Cavity/Oscillator): 测量相空间分布 (Phase Space)。
+
+### 可视化工具: Wigner Function
+*(建议在此处展示 Fock |3> 态的 Wigner 图)*
+- **Wigner 函数**: $W(x,p)$ 是相空间中的准概率分布。
+- **直观理解**: 
+    - 对应的“地形图”展示了量子的位置和动量分布。
+    - **负值区域**标志着非经典性 (Non-classicality)，是量子优越性的指纹。
+
+---
+
+## 4. 超导量子系统中的实现 (Implementation in Superconducting Circuits)
+
+### 硬件架构
+- **系统**: 超导量子比特 (Transmon) + 超导微波腔 (Cavity)。
+- **相互作用**: 
+    - 腔充当量子存储器 (Quantum Memory)。
+    - Qubit 充当非线性“探针” (Ancilla)。
+
+### 测量方法 (Wigner Tomography)
+1. **位移操作 (Displace)**: 对腔施加微波脉冲 $D(-\alpha)$，在相空间平移量子态。
+2. **宇称测量 (Parity Measurement)**: 利用 Ramsey 干涉测量腔内光子数的奇偶性。
+    - $W(\alpha) = \frac{2}{\pi} \text{Tr}[D(-\alpha)\rho D(\alpha) \Pi]$
+3. **点对点扫描**: 传统方法需要遍历整个相空间网格 (Raster Scan)。
+
+---
+
+## 5. 传统方法的瓶颈 (The Challenge)
+
+1. **维度灾难**: 
+    - Qubit 系统: 测量数随比特数 $N$ 增长为 $3^N$。
+    - 连续变量系统: 网格点数随分辨率平方增长。
+2. **时间成本**:
+    - 一张高精度 Wigner 图可能需要数分钟到数小时。
+    - 在此期间，系统参数漂移 (Drift) 会破坏数据准确性。
+3. **后处理复杂**:
+    - 极大似然估计 (MLE) 需要求解大规模优化问题，计算开销巨大。
+
+---
+
+## 6. 机器学习的增强作用 (Machine Learning Approaches)
+
+### A. 神经网络量子态层析 (NN-QST)
+- **原理**: 用神经网络 (RBM, RNN, Transformer) 作为波函数的参数化构型 (Ansatz)。
+- **优势**: 
+    - 压缩表示 (Compressed Representation)。
+    - 只需要较少的测量数据即可收敛。
+
+### B. 主动学习 (Active Learning) - *本次汇报重点*
+*(结合 active_learning_2d.py 的演示结果)*
+
+- **核心思想**: 不要盲目扫描整个相空间！
+- **流程**:
+    1. **初始猜测**: 测量少量点，训练初步模型 (Committee of Models)。
+    2. **不确定性评估**: 计算模型在未测量区域的预测方差 (Variance)。
+    3. **智能采样**: 选择方差最大 (最不确定) 的点进行下一次测量。
+- **效果**:
+    - 就像我们代码中展示的：**只测量 10%-15% 的点，就能高精度重构 Fock |3> 态**。
+    - 自动聚焦于“特征丰富”的区域 (如干涉条纹、陡峭边缘)。
+    - **大幅节省实验时间**。
+
+---
+
+## 7. 总结与展望 (Summary)
+
+- **State Tomography** 是量子工程的“眼睛”，用于诊断和验证。
+- **超导系统** 中常使用 Wigner Tomography 来表征玻色模式。
+- **机器学习 (特别是主动学习)** 正在彻底改变这一领域：
+    - **更准**: 去除噪声影响。
+    - **更快**: 减少 50%-90% 的测量次数。
+- **未来工作**: 
+    - 将主动学习部署到实时 FPGA 控制系统中。
+    - 探索高维多模式系统的层析方案。
+
+---
+*Q&A*

@@ -4,6 +4,7 @@ import torch.optim as optim
 import numpy as np
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
+from scipy.special import factorial, genlaguerre
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -461,10 +462,10 @@ class ActiveLearningIntegrator:
             z_vals = self.train_values.numpy().flatten()
             
             sc = axes[4].scatter(x_vals, y_vals, c=z_vals, s=20, 
-                                cmap='viridis', alpha=0.8)
-            axes[4].set_xlabel('x')
-            axes[4].set_ylabel('y')
-            axes[4].set_title('函数值分布')
+                                cmap='RdBu_r', alpha=0.8)
+            axes[4].set_xlabel('x (位置)')
+            axes[4].set_ylabel('p (动量)')
+            axes[4].set_title('Wigner函数值分布')
             plt.colorbar(sc, ax=axes[4])
             axes[4].grid(True, alpha=0.3)
         
@@ -488,9 +489,120 @@ class ActiveLearningIntegrator:
         
         plt.tight_layout()
         plt.show()
+        
+        # ======= 新增：相对误差分布图 =======
+        self.plot_relative_error()
+    
+    def plot_relative_error(self):
+        """绘制每个点的相对误差百分比分布"""
+        # 获取所有点的预测值
+        results = self.get_final_predictions()
+        pred_mean = results['mean'].numpy()
+        
+        # 计算所有点的精确值
+        exact_values = []
+        for point in self.all_points:
+            x, y = point[0].item(), point[1].item()
+            exact_values.append(self.func(x, y))
+        exact_values = np.array(exact_values)
+        
+        # 计算相对误差百分比
+        # 使用 |pred - exact| / (|exact| + epsilon) * 100 避免除零
+        epsilon = 1e-10
+        absolute_error = np.abs(pred_mean - exact_values)
+        relative_error_percent = absolute_error / (np.abs(exact_values) + epsilon) * 100
+        
+        # 限制最大相对误差显示为500%以提高可视化效果
+        relative_error_clipped = np.clip(relative_error_percent, 0, 500)
+        
+        # 创建新图
+        fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+        
+        # 1. 相对误差分布直方图
+        axes[0].hist(relative_error_clipped, bins=50, alpha=0.7, color='crimson', edgecolor='black')
+        axes[0].set_xlabel('相对误差 (%)')
+        axes[0].set_ylabel('点数')
+        axes[0].set_title('相对误差百分比分布')
+        axes[0].axvline(x=np.median(relative_error_percent), color='blue', linestyle='--', 
+                       label=f'中位数: {np.median(relative_error_percent):.1f}%')
+        axes[0].axvline(x=np.mean(relative_error_percent), color='green', linestyle='--', 
+                       label=f'均值: {np.mean(relative_error_percent):.1f}%')
+        axes[0].legend()
+        axes[0].grid(True, alpha=0.3)
+        
+        # 2. 空间分布的相对误差热力图
+        points = self.all_points.numpy()
+        sc = axes[1].scatter(points[:, 0], points[:, 1], c=relative_error_clipped, 
+                            s=5, cmap='hot', alpha=0.8)
+        axes[1].set_xlabel('x (位置)')
+        axes[1].set_ylabel('p (动量)')
+        axes[1].set_title('相对误差空间分布 (%)')
+        plt.colorbar(sc, ax=axes[1], label='相对误差 (%)')
+        axes[1].grid(True, alpha=0.3)
+        
+        # 3. 预测值 vs 精确值 散点图
+        axes[2].scatter(exact_values, pred_mean, s=5, alpha=0.5, color='steelblue')
+        # 添加理想对角线
+        min_val = min(exact_values.min(), pred_mean.min())
+        max_val = max(exact_values.max(), pred_mean.max())
+        axes[2].plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2, label='理想预测')
+        axes[2].set_xlabel('精确值')
+        axes[2].set_ylabel('预测值')
+        axes[2].set_title('预测值 vs 精确值')
+        axes[2].legend()
+        axes[2].grid(True, alpha=0.3)
+        axes[2].set_aspect('equal', 'box')
+        
+        plt.suptitle(f'模型预测误差分析\n平均相对误差: {np.mean(relative_error_percent):.2f}% | '
+                    f'中位数: {np.median(relative_error_percent):.2f}% | '
+                    f'<10%的点占比: {np.mean(relative_error_percent < 10)*100:.1f}%', 
+                    fontsize=12, fontweight='bold')
+        
+        plt.tight_layout()
+        plt.show()
+        
+        # 打印统计信息
+        print(f"\n{'='*60}")
+        print("相对误差统计:")
+        print(f"{'='*60}")
+        print(f"平均相对误差: {np.mean(relative_error_percent):.2f}%")
+        print(f"中位数相对误差: {np.median(relative_error_percent):.2f}%")
+        print(f"最大相对误差: {np.max(relative_error_percent):.2f}%")
+        print(f"最小相对误差: {np.min(relative_error_percent):.2f}%")
+        print(f"相对误差 < 5% 的点占比: {np.mean(relative_error_percent < 5)*100:.1f}%")
+        print(f"相对误差 < 10% 的点占比: {np.mean(relative_error_percent < 10)*100:.1f}%")
+        print(f"相对误差 < 20% 的点占比: {np.mean(relative_error_percent < 20)*100:.1f}%")
 
 
 # ==================== 3. 测试函数定义 ====================
+
+def fock_wigner(x, p, n=3):
+    """
+    Fock态 |n⟩ 的Wigner函数
+    
+    W_n(x, p) = ((-1)^n / π) * L_n(2*(x^2 + p^2)) * exp(-(x^2 + p^2))
+    
+    其中 L_n 是Laguerre多项式
+    
+    参数:
+        x: 位置坐标 (相空间)
+        p: 动量坐标 (相空间)
+        n: Fock态的光子数 (默认n=3)
+    
+    返回:
+        Wigner函数值
+    """
+    # 相空间中的径向距离平方
+    r_squared = x**2 + p**2
+    
+    # Laguerre多项式 L_n(2*r^2)
+    L_n = genlaguerre(n, 0)  # 广义Laguerre多项式，alpha=0时为普通Laguerre多项式
+    laguerre_val = L_n(2 * r_squared)
+    
+    # Wigner函数
+    wigner = ((-1)**n / np.pi) * laguerre_val * np.exp(-r_squared)
+    
+    return wigner
 
 def test_function_1(x, y):
     """简单函数: sin(x)*cos(y) + 0.1*(x²+y²)"""
@@ -510,36 +622,48 @@ def test_function_4(x, y):
             0.3 * np.exp(-((x-1)**2 + (y-1)**2)/0.2) +
             0.2 * np.exp(-((x+1)**2 + (y+1)**2)/0.3))
 
+def fock3_wigner_function(x, y):
+    """Fock |3⟩ 态的Wigner函数包装器"""
+    return fock_wigner(x, y, n=3)
+
 # ==================== 4. 主程序 ====================
 
 def main():
     print("主动学习神经网络积分求解器")
     print("="*50)
+    print("量子态Wigner函数积分")
     
     # 选择测试函数
     test_functions = {
-        '1': test_function_1,
-        '2': test_function_2,
-        '3': test_function_3,
-        '4': test_function_4
+        '1': fock3_wigner_function,
+        '2': test_function_1,
+        '3': test_function_2,
+        '4': test_function_3,
+        '5': test_function_4
     }
     
     print("\n请选择测试函数:")
-    print("1: sin(x)*cos(y) + 0.1*(x²+y²)")
-    print("2: sin(2x+y)*cos(x-y) + 高斯项")
-    print("3: 高频振荡函数")
-    print("4: 多峰函数")
+    print("1: Fock |3⟩ 态Wigner函数 (量子态) [默认]")
+    print("2: sin(x)*cos(y) + 0.1*(x²+y²)")
+    print("3: sin(2x+y)*cos(x-y) + 高斯项")
+    print("4: 高频振荡函数")
+    print("5: 多峰函数")
     
-    choice = input("请输入选择 (1-4, 默认1): ").strip()
+    choice = input("请输入选择 (1-5, 默认1): ").strip()
     if choice not in test_functions:
         choice = '1'
     
     target_func = test_functions[choice]
+    func_name = "Fock |3⟩ Wigner函数" if choice == '1' else f"测试函数{choice}"
     
-    # 定义积分域
-    domain = [(-2, 2), (-2, 2)]  # x∈[-2,2], y∈[-2,2]
-    
-    print(f"\n积分域: x ∈ [{domain[0][0]}, {domain[0][1]}], y ∈ [{domain[1][0]}, {domain[1][1]}]")
+    # 定义积分域 - 对于Wigner函数使用更大的相空间范围
+    if choice == '1':
+        domain = [(-4, 4), (-4, 4)]  # 相空间 x∈[-4,4], p∈[-4,4]
+        print(f"\n目标函数: {func_name}")
+        print(f"相空间域: x ∈ [{domain[0][0]}, {domain[0][1]}], p ∈ [{domain[1][0]}, {domain[1][1]}]")
+    else:
+        domain = [(-2, 2), (-2, 2)]  # x∈[-2,2], y∈[-2,2]
+        print(f"\n积分域: x ∈ [{domain[0][0]}, {domain[0][1]}], y ∈ [{domain[1][0]}, {domain[1][1]}]")
     
     # 创建主动学习积分器
     print("\n创建主动学习积分器...")
