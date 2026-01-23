@@ -118,10 +118,10 @@ def create_state(grid_size=64, state_type=1, x_range=(-5, 5), **params):
         W = fock_wigner(X, P, n=n)
         state_name = f"Fock态 |{n}⟩"
     elif state_type == 2:
-        # 相干态
+        # 相干态 (沿p轴/虚轴集中)
         alpha = params.get('alpha', 2.0)
-        W = coherent_wigner(X, P, alpha_real=alpha, alpha_imag=0)
-        state_name = f"相干态 |α={alpha}⟩"
+        W = coherent_wigner(X, P, alpha_real=0, alpha_imag=alpha)
+        state_name = f"Coherent |alpha={alpha}i>"
     elif state_type == 3:
         # 猫态
         alpha = params.get('alpha', 2.0)

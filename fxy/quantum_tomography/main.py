@@ -40,6 +40,8 @@ def main():
                        help='每轮训练epochs')
     parser.add_argument('--pretrain_epochs', type=int, default=100,
                        help='预训练epochs')
+    parser.add_argument('--samples_per_round', type=int, default=10,
+                       help='每轮增加的采样点数')
     args = parser.parse_args()
     
     # 设置随机种子
@@ -71,7 +73,7 @@ def main():
         grid_size=64,
         state_type=args.state,
         initial_ratio=0.02,      # 初始2%
-        samples_per_round=20,    # 每轮+20点
+        samples_per_round=args.samples_per_round,  # 每轮增加点数
         max_rounds=args.rounds,
         epochs=args.epochs,
         pretrain_epochs=args.pretrain_epochs,

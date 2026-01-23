@@ -70,8 +70,8 @@ def plot_sampling_distribution(tomo, save_dir):
         ax.scatter(tomo.X[0, sample_x], tomo.P[sample_y, 0], 
                   s=8, c=[colors[i]], alpha=0.8, label=label)
     
-    ax.set_xlabel("x (position)", fontsize=12)
-    ax.set_ylabel("p (momentum)", fontsize=12)
+    ax.set_xlabel("Re(alpha)", fontsize=12)
+    ax.set_ylabel("Im(alpha)", fontsize=12)
     ax.set_title(f"Sampling Distribution: {tomo.state_name}", fontsize=14, fontweight='bold')
     ax.set_aspect('equal')
     ax.legend(loc='upper right', fontsize=8, ncol=2)
@@ -120,18 +120,23 @@ def plot_fidelity_curves(tomo, save_dir):
 
 
 def plot_reconstruction(tomo, save_dir):
-    """图3: 重构Wigner函数"""
+    """图3: 重构Wigner函数 (Wigner=0显示为白色)"""
     fig, ax = plt.subplots(figsize=(10, 9))
+    
+    # 自定义colormap: 负值蓝色，零值白色，正值红色
+    colors = [(0.0, 'darkblue'), (0.25, 'blue'), (0.5, 'white'), 
+              (0.75, 'red'), (1.0, 'darkred')]
+    cmap = LinearSegmentedColormap.from_list('wigner_cmap', colors)
     
     vmax = max(np.max(np.abs(tomo.final_pred)), np.max(np.abs(tomo.exp_wigner)))
     cf = ax.contourf(tomo.X, tomo.P, tomo.final_pred, levels=50, 
-                     cmap='RdBu_r', vmin=-vmax, vmax=vmax)
+                     cmap=cmap, vmin=-vmax, vmax=vmax)
     cbar = plt.colorbar(cf, ax=ax)
     cbar.set_label('W(x, p)', fontsize=11)
     
-    ax.set_xlabel("x (position)", fontsize=12)
-    ax.set_ylabel("p (momentum)", fontsize=12)
-    ax.set_title(f"Reconstructed Wigner Function\nF = {tomo.final_F_exp:.4f}", 
+    ax.set_xlabel("Re(alpha)", fontsize=12)
+    ax.set_ylabel("Im(alpha)", fontsize=12)
+    ax.set_title(f"Reconstructed Wigner Function\\nF = {tomo.final_F_exp:.4f}", 
                 fontsize=14, fontweight='bold')
     ax.set_aspect('equal')
     
@@ -143,18 +148,23 @@ def plot_reconstruction(tomo, save_dir):
 
 
 def plot_experimental_state(tomo, save_dir):
-    """图4: 实验态Wigner函数"""
+    """图4: 实验态Wigner函数 (Wigner=0显示为白色)"""
     fig, ax = plt.subplots(figsize=(10, 9))
+    
+    # 自定义colormap: 负值蓝色，零值白色，正值红色
+    colors = [(0.0, 'darkblue'), (0.25, 'blue'), (0.5, 'white'), 
+              (0.75, 'red'), (1.0, 'darkred')]
+    cmap = LinearSegmentedColormap.from_list('wigner_cmap', colors)
     
     vmax = np.max(np.abs(tomo.exp_wigner))
     cf = ax.contourf(tomo.X, tomo.P, tomo.exp_wigner, levels=50, 
-                     cmap='RdBu_r', vmin=-vmax, vmax=vmax)
+                     cmap=cmap, vmin=-vmax, vmax=vmax)
     cbar = plt.colorbar(cf, ax=ax)
     cbar.set_label('W(x, p)', fontsize=11)
     
-    ax.set_xlabel("x (position)", fontsize=12)
-    ax.set_ylabel("p (momentum)", fontsize=12)
-    ax.set_title(f"Experimental Wigner Function: {tomo.state_name}\n"
+    ax.set_xlabel("Re(alpha)", fontsize=12)
+    ax.set_ylabel("Im(alpha)", fontsize=12)
+    ax.set_title(f"Experimental Wigner Function: {tomo.state_name}\\n"
                 f"F(exp vs ideal) = {tomo.F_exp_vs_ideal:.4f}", 
                 fontsize=14, fontweight='bold')
     ax.set_aspect('equal')
@@ -182,8 +192,8 @@ def plot_relative_error(tomo, save_dir):
     cbar = plt.colorbar(cf, ax=ax)
     cbar.set_label('Relative Error (%)', fontsize=11)
     
-    ax.set_xlabel("x (position)", fontsize=12)
-    ax.set_ylabel("p (momentum)", fontsize=12)
+    ax.set_xlabel("Re(alpha)", fontsize=12)
+    ax.set_ylabel("Im(alpha)", fontsize=12)
     ax.set_title("Relative Error: (W_recon - W_exp) / W_exp × 100%", 
                 fontsize=14, fontweight='bold')
     ax.set_aspect('equal')
@@ -217,8 +227,8 @@ def plot_sampling_density(tomo, save_dir):
     cbar = plt.colorbar(cf, ax=ax)
     cbar.set_label('Sampling Density', fontsize=11)
     
-    ax.set_xlabel("x (position)", fontsize=12)
-    ax.set_ylabel("p (momentum)", fontsize=12)
+    ax.set_xlabel("Re(alpha)", fontsize=12)
+    ax.set_ylabel("Im(alpha)", fontsize=12)
     ax.set_title(f"Sampling Density Heatmap\nTotal: {tomo.sampling_mask.sum()} points "
                 f"({tomo.final_ratio*100:.1f}%)", fontsize=14, fontweight='bold')
     

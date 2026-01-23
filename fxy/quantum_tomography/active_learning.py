@@ -152,16 +152,17 @@ class QuantumTomography:
         self.stop_round = -1
         
     def _pretrain_committee(self):
-        """使用理想态进行预训练，加速后续学习 (去噪预训练)"""
+        """
+        使用指定态的理论形式进行预训练
+        
+        关键：使用self.ideal_wigner（用户指定的实验态对应的理论态）
+        让委员会学习该特定量子态的结构，从而在初始阶段给出更合理的预测。
+        """
         print(f"\n[预训练] 使用理论态预训练委员会 ({self.pretrain_epochs} epochs)...")
-        if self.noise_model:
-            print("  策略: 去噪学习 (Noisy Input -> Clean Target)")
-        else:
-            print("  策略: 结构学习 (Clean Input -> Clean Target)")
+        print(f"  目标态: {self.state_name}")
+        print("  策略: 稀疏重建学习 (Sparse -> Complete)")
             
-        # 生成预训练数据：理想态 + 随机掩码
-        # 为了让模型学会从稀疏数据恢复，我们生成一系列不同稀疏度的理想态样本
-        n_samples = 200
+        n_samples = 300
         inputs = []
         targets = []
         
@@ -170,10 +171,14 @@ class QuantumTomography:
             ratio = np.random.uniform(0.02, 0.30)
             mask = generate_random_mask(self.grid_size, ratio)
             
-            # 输入：理想态 + 掩码 + 噪声 (如果有)
-            # 这里的关键是让模型学会从带有实验噪声的输入中恢复出理想态
-            sparse_input = create_sparse_input(self.ideal_wigner, mask, self.noise_model)
+            # 输入：理论态的稀疏采样 (可选加噪声增强鲁棒性)
+            if self.noise_model and np.random.random() < 0.5:
+                sparse_input = create_sparse_input(self.ideal_wigner, mask, self.noise_model)
+            else:
+                sparse_input = create_sparse_input(self.ideal_wigner, mask, None)
+            
             inputs.append(sparse_input)
+            # 目标始终是干净的理论态
             targets.append(self.ideal_wigner[np.newaxis, :, :])
             
         # 转换为Tensor
@@ -242,18 +247,62 @@ class QuantumTomography:
         predictions = np.array(predictions)
         return predictions.mean(axis=0), predictions.var(axis=0), predictions
     
-    def _select_new_points(self, variance, n_points):
-        candidate_var = variance.copy()
-        # 已经采样过的地方方差设为负无穷，不再选择
-        candidate_var[self.sampling_mask] = -np.inf
+    def _compute_gradient_magnitude(self, pred):
+        """计算预测的梯度幅值，用于识别变化剧烈区域"""
+        # 使用Sobel算子计算梯度
+        dy = np.abs(np.diff(pred, axis=0, prepend=pred[0:1, :]))
+        dx = np.abs(np.diff(pred, axis=1, prepend=pred[:, 0:1]))
+        gradient_mag = np.sqrt(dx**2 + dy**2)
+        return gradient_mag
+    
+    def _compute_origin_weight(self):
+        """计算距离原点的权重，原点附近物理特征通常更明显"""
+        center = self.grid_size // 2
+        y, x = np.ogrid[:self.grid_size, :self.grid_size]
+        dist = np.sqrt((x - center)**2 + (y - center)**2)
+        # 高斯权重，原点附近权重高
+        sigma = self.grid_size / 4
+        weight = np.exp(-dist**2 / (2 * sigma**2))
+        return weight
+    
+    def _select_new_points(self, variance, n_points, mean_pred=None):
+        """
+        基于物理信息的采样点选择
         
-        # 选择方差最大的n_points个点
-        # 注意：如果remaining points不够，就取所有的
+        结合三个因素:
+        1. 委员会方差 (不确定性) - 模型不确定的区域
+        2. 梯度幅值 (变化剧烈区域) - Wigner函数振荡明显的地方
+        3. 原点权重 (物理核心区域) - 量子态特征通常集中在相空间原点附近
+        """
+        # 归一化各因素到 [0, 1]
+        var_score = variance.copy()
+        var_score[self.sampling_mask] = 0  # 已采样点不考虑
+        if var_score.max() > 0:
+            var_score = var_score / var_score.max()
+        
+        # 梯度幅值
+        if mean_pred is not None:
+            grad_score = self._compute_gradient_magnitude(mean_pred)
+            grad_score[self.sampling_mask] = 0
+            if grad_score.max() > 0:
+                grad_score = grad_score / grad_score.max()
+        else:
+            grad_score = np.zeros_like(variance)
+        
+        # 原点权重
+        origin_weight = self._compute_origin_weight()
+        origin_weight[self.sampling_mask] = 0
+        
+        # 综合评分: 不确定性 * 0.5 + 梯度 * 0.3 + 原点权重 * 0.2
+        combined_score = 0.5 * var_score + 0.3 * grad_score + 0.2 * origin_weight
+        combined_score[self.sampling_mask] = -np.inf  # 确保已采样点不被选中
+        
+        # 选择得分最高的n_points个点
         n_remaining = (~self.sampling_mask).sum()
         n_points = min(n_points, n_remaining)
         
         if n_points > 0:
-            flat_indices = np.argsort(candidate_var.ravel())[-n_points:]
+            flat_indices = np.argsort(combined_score.ravel())[-n_points:]
             new_mask = np.zeros_like(self.sampling_mask)
             new_mask.flat[flat_indices] = True
             return new_mask
@@ -263,7 +312,7 @@ class QuantumTomography:
     def run(self):
         """运行主动学习层析"""
         print("\n" + "="*60)
-        print(f"主动学习稀疏量子态层析 (Random Mask Training)")
+        print(f"主动学习稀疏量子态层析 (智能初始化采样)")
         print("="*60)
         print(f"态类型: {self.state_name}")
         print(f"初始采样率: {self.initial_ratio*100:.1f}%")
@@ -275,11 +324,38 @@ class QuantumTomography:
         # 0. 预训练 (通用结构学习)
         self._pretrain_committee()
         
-        # 1. 初始采样 (随机采样)
+        # 1. 基于预训练结果的智能初始采样
+        # 使用预训练后的委员会对空输入（或极稀疏输入）进行预测
+        # 根据委员会不确定性（方差）选择初始采样点
+        print("[初始化] 基于预训练结果选择初始采样点...")
+        
+        # 创建一个极稀疏的输入（仅几个随机点）作为"探测"
+        probe_mask = np.zeros((self.grid_size, self.grid_size), dtype=bool)
+        # 在四个角和中心放几个探测点
+        corner_offset = 5
+        probe_mask[corner_offset, corner_offset] = True
+        probe_mask[corner_offset, -corner_offset-1] = True
+        probe_mask[-corner_offset-1, corner_offset] = True
+        probe_mask[-corner_offset-1, -corner_offset-1] = True
+        probe_mask[self.grid_size//2, self.grid_size//2] = True
+        
+        # 使用理论态的这些点（模拟真实实验时会用实验测量值）
+        probe_input = create_sparse_input(self.ideal_wigner, probe_mask, None)
+        
+        # 让预训练后的委员会预测并计算不确定性
+        mean_pred, variance, _ = self._committee_predict(probe_input)
+        
+        # 计算综合得分（不确定性 + 梯度 + 原点权重）
         n_initial = int(self.grid_size ** 2 * self.initial_ratio)
-        initial_indices = np.random.choice(self.grid_size ** 2, n_initial, replace=False)
-        initial_mask = np.zeros_like(self.sampling_mask)
-        initial_mask.flat[initial_indices] = True
+        
+        # 根据预测的方差和梯度选择初始点
+        initial_mask = self._select_new_points(variance, n_initial, mean_pred=mean_pred)
+        
+        # 确保探测点也被包含在初始采样中
+        initial_mask |= probe_mask
+        
+        print(f"  根据预训练不确定性选择了 {initial_mask.sum()} 个初始采样点")
+        print(f"  采样偏向: 变化剧烈区域 + 原点附近\n")
             
         self.sampling_mask = initial_mask.copy()
         self.sampling_history.append(initial_mask.copy())
@@ -326,13 +402,13 @@ class QuantumTomography:
                 self.stop_round = round_id + 1
                 break
             
-            # 添加新采样点 (固定数量)
+            # 添加新采样点 (基于物理信息的智能采样)
             if round_id < self.max_rounds - 1:
                 n_new = self.samples_per_round
-                new_mask = self._select_new_points(variance, n_new)
+                # 传入mean_pred以计算梯度权重
+                new_mask = self._select_new_points(variance, n_new, mean_pred=mean_pred)
                 self.sampling_mask |= new_mask
                 self.sampling_history.append(new_mask.copy())
-                # print(f"  新增 {n_new} 个采样点\n")
         
         # 最终预测
         sparse_input = create_sparse_input(
