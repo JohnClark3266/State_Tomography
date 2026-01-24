@@ -144,53 +144,37 @@ class FastTomographyMatlab:
             return self.ideal_wigner.copy()
     
     def _pretrain(self):
-        """预训练: 学习从稀疏到完整的重建"""
-        print(f"\n[预训练] {self.pretrain_epochs} epochs...")
+        """预训练: 直接用完整理论态训练一次"""
+        print("\n[预训练] 使用完整理论态 (4096 点)...")
         
-        # 生成预训练数据
-        n_samples = 200
-        inputs = []
-        targets = []
+        # 输入: 完整 Wigner + 全1掩码
+        full_wigner = self.ideal_wigner.astype(np.float32)
+        full_mask = np.ones((self.grid_size, self.grid_size), dtype=np.float32)
         
-        for _ in range(n_samples):
-            ratio = np.random.uniform(0.02, 0.30)
-            n_sample = int(self.grid_size ** 2 * ratio)
-            indices = np.random.choice(self.grid_size ** 2, n_sample, replace=False)
-            
-            # 稀疏输入
-            sparse = np.zeros((self.grid_size, self.grid_size))
-            mask = np.zeros((self.grid_size, self.grid_size))
-            
-            flat_sparse = sparse.flatten()
-            flat_mask = mask.flatten()
-            flat_sparse[indices] = self.ideal_wigner.flatten()[indices]
-            flat_mask[indices] = 1.0
-            
-            sparse = flat_sparse.reshape(self.grid_size, self.grid_size)
-            mask = flat_mask.reshape(self.grid_size, self.grid_size)
-            
-            inp = np.stack([sparse, mask], axis=0).astype(np.float32)
-            inputs.append(inp)
-            targets.append(self.ideal_wigner[np.newaxis, :, :].astype(np.float32))
+        # (1, 2, 64, 64): batch=1, channels=2
+        train_input = torch.tensor(
+            np.stack([full_wigner, full_mask], axis=0)[np.newaxis, :, :, :]
+        ).to(self.device)
         
-        # 训练
-        train_inputs = torch.tensor(np.array(inputs))
-        train_targets = torch.tensor(np.array(targets))
-        dataset = TensorDataset(train_inputs, train_targets)
-        loader = DataLoader(dataset, batch_size=32, shuffle=True)
+        # 目标: 完整 Wigner (1, 1, 64, 64)
+        train_target = torch.tensor(
+            full_wigner[np.newaxis, np.newaxis, :, :]
+        ).to(self.device)
+        
         criterion = nn.MSELoss()
         
+        # 对每个模型进行单次训练
         for name, model in self.committee:
             model.train()
             optimizer = optim.Adam(model.parameters(), lr=self.lr)
-            for _ in range(self.pretrain_epochs):
-                for xb, yb in loader:
-                    xb, yb = xb.to(self.device), yb.to(self.device)
-                    optimizer.zero_grad()
-                    pred = model(xb)
-                    loss = criterion(pred, yb)
-                    loss.backward()
-                    optimizer.step()
+            
+            optimizer.zero_grad()
+            pred = model(train_input)
+            loss = criterion(pred, train_target)
+            loss.backward()
+            optimizer.step()
+            
+            print(f"  {name}: loss = {loss.item():.6f}")
         
         print("✓ 预训练完成\n")
     
