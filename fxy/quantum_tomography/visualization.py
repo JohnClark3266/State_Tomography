@@ -48,7 +48,7 @@ def plot_all_results(tomo, save_dir="results"):
 
 
 def plot_sampling_distribution(tomo, save_dir):
-    """图1: 采样分布（每轮不同颜色）"""
+    """图1: 采样分布（每轮新增点用不同颜色）"""
     fig, ax = plt.subplots(figsize=(10, 9))
     
     # 半透明理论态衬底
@@ -58,27 +58,54 @@ def plot_sampling_distribution(tomo, save_dir):
     
     # 为每轮采样点分配不同颜色
     n_rounds = len(tomo.sampling_history)
-    colors = plt.cm.viridis(np.linspace(0, 1, n_rounds))
+    colors = plt.cm.rainbow(np.linspace(0, 1, max(n_rounds, 1)))
+    
+    # 记录累积的点，以便只画每轮新增的点
+    prev_mask = np.zeros((tomo.grid_size, tomo.grid_size), dtype=bool)
     
     for i, mask in enumerate(tomo.sampling_history):
-        sample_y, sample_x = np.where(mask)
-        ratio = mask.sum() / (tomo.grid_size ** 2) * 100
+        # 只取这一轮新增的点 (当前mask减去之前的累积mask)
+        new_points_mask = mask & (~prev_mask)
+        
+        # 获取新增采样点的行列索引
+        row_indices, col_indices = np.where(new_points_mask)
+        
+        if len(row_indices) == 0:
+            prev_mask = mask.copy()
+            continue
+        
+        # 将索引转换为实际坐标值
+        x_coords = tomo.X[0, col_indices]
+        p_coords = tomo.P[row_indices, 0]
+        
+        n_new = new_points_mask.sum()
+        total = mask.sum()
+        
         if i == 0:
-            label = f"Round {i+1} (初始 {ratio:.1f}%)"
+            label = f"Round {i+1}: {n_new} pts (Initial)"
         else:
-            label = f"Round {i+1} (+{ratio:.1f}%)"
-        ax.scatter(tomo.X[0, sample_x], tomo.P[sample_y, 0], 
-                  s=8, c=[colors[i]], alpha=0.8, label=label)
+            label = f"Round {i+1}: +{n_new} pts"
+        
+        ax.scatter(x_coords, p_coords, s=15, c=[colors[i]], 
+                   alpha=0.9, label=label, edgecolors='none')
+        
+        prev_mask = mask.copy()
     
-    ax.set_xlabel("Re(alpha)", fontsize=12)
-    ax.set_ylabel("Im(alpha)", fontsize=12)
-    ax.set_title(f"Sampling Distribution: {tomo.state_name}", fontsize=14, fontweight='bold')
+    ax.set_xlabel("x (Re direction)", fontsize=12)
+    ax.set_ylabel("p (Im direction)", fontsize=12)
+    total_sampled = tomo.sampling_mask.sum()
+    ratio = total_sampled / (tomo.grid_size ** 2) * 100
+    ax.set_title(f"Sampling Distribution: {tomo.state_name}\n"
+                 f"Total: {total_sampled} points ({ratio:.1f}%)", 
+                 fontsize=14, fontweight='bold')
     ax.set_aspect('equal')
-    ax.legend(loc='upper right', fontsize=8, ncol=2)
+    
+    # 图例放在右侧外面，避免遮挡
+    ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1), fontsize=8)
     
     plt.tight_layout()
     filepath = f"{save_dir}/1_sampling_distribution.png"
-    plt.savefig(filepath, dpi=300)
+    plt.savefig(filepath, dpi=300, bbox_inches='tight')
     print(f"保存: {filepath}")
     plt.close()
 
@@ -177,37 +204,54 @@ def plot_experimental_state(tomo, save_dir):
 
 
 def plot_relative_error(tomo, save_dir):
-    """图5: 相对误差百分比"""
-    fig, ax = plt.subplots(figsize=(10, 9))
+    """图5: 绝对误差 (比相对误差更有意义)"""
+    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
     
-    # 计算相对误差 (避免除零)
-    exp_abs = np.abs(tomo.exp_wigner) + 1e-10
+    # 计算误差
     error = tomo.final_pred - tomo.exp_wigner
-    relative_error = (error / exp_abs) * 100
+    abs_error = np.abs(error)
     
-    # 限制在合理范围
-    relative_error = np.clip(relative_error, -100, 100)
+    # 左图: 绝对误差
+    ax1 = axes[0]
+    vmax_err = np.max(abs_error)
+    cf1 = ax1.contourf(tomo.X, tomo.P, abs_error, levels=50, cmap='hot')
+    cbar1 = plt.colorbar(cf1, ax=ax1)
+    cbar1.set_label('Absolute Error', fontsize=11)
     
-    cf = ax.contourf(tomo.X, tomo.P, relative_error, levels=50, cmap='RdBu_r')
-    cbar = plt.colorbar(cf, ax=ax)
-    cbar.set_label('Relative Error (%)', fontsize=11)
-    
-    ax.set_xlabel("Re(alpha)", fontsize=12)
-    ax.set_ylabel("Im(alpha)", fontsize=12)
-    ax.set_title("Relative Error: (W_recon - W_exp) / W_exp × 100%", 
-                fontsize=14, fontweight='bold')
-    ax.set_aspect('equal')
+    ax1.set_xlabel("x (Re direction)", fontsize=12)
+    ax1.set_ylabel("p (Im direction)", fontsize=12)
+    ax1.set_title("Absolute Error: |W_recon - W_target|", fontsize=14, fontweight='bold')
+    ax1.set_aspect('equal')
     
     # 添加统计信息
-    mean_err = np.mean(np.abs(relative_error))
-    max_err = np.max(np.abs(relative_error))
-    ax.text(0.02, 0.98, f"Mean |Error|: {mean_err:.2f}%\nMax |Error|: {max_err:.2f}%",
-            transform=ax.transAxes, fontsize=10, verticalalignment='top',
+    mean_abs = np.mean(abs_error)
+    max_abs = np.max(abs_error)
+    ax1.text(0.02, 0.98, f"Mean: {mean_abs:.4f}\nMax: {max_abs:.4f}",
+            transform=ax1.transAxes, fontsize=10, verticalalignment='top',
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+    # 右图: 有符号误差 (正/负)
+    ax2 = axes[1]
+    vmax = max(np.max(error), -np.min(error))
+    cf2 = ax2.contourf(tomo.X, tomo.P, error, levels=50, cmap='RdBu_r', 
+                        vmin=-vmax, vmax=vmax)
+    cbar2 = plt.colorbar(cf2, ax=ax2)
+    cbar2.set_label('Signed Error', fontsize=11)
+    
+    ax2.set_xlabel("x (Re direction)", fontsize=12)
+    ax2.set_ylabel("p (Im direction)", fontsize=12)
+    ax2.set_title("Signed Error: W_recon - W_target", fontsize=14, fontweight='bold')
+    ax2.set_aspect('equal')
+    
+    # RMS 误差
+    rms = np.sqrt(np.mean(error**2))
+    ax2.text(0.02, 0.98, f"RMS: {rms:.4f}",
+            transform=ax2.transAxes, fontsize=10, verticalalignment='top',
             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
     
     plt.tight_layout()
     filepath = f"{save_dir}/5_relative_error.png"
-    plt.savefig(filepath, dpi=300)
+    plt.savefig(filepath, dpi=300, bbox_inches='tight')
     print(f"保存: {filepath}")
     plt.close()
 

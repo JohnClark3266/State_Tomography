@@ -6,8 +6,12 @@
 
 import numpy as np
 
-from .gkp_state import create_gkp_grid
-from .noise_model import ExperimentalNoise
+try:
+    from .gkp_state import create_gkp_grid
+    from .noise_model import ExperimentalNoise
+except ImportError:
+    from gkp_state import create_gkp_grid
+    from noise_model import ExperimentalNoise
 
 
 def create_sparse_input(full_wigner, sampling_mask, noise_model=None):

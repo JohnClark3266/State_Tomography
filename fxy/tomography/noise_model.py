@@ -9,7 +9,10 @@
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
-from .fidelity import compute_fidelity
+try:
+    from .fidelity import compute_fidelity
+except ImportError:
+    from fidelity import compute_fidelity
 
 
 class ExperimentalNoise:

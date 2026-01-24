@@ -8,11 +8,22 @@ GKP态稀疏量子态层析 - 主入口
     python main.py
 """
 
+import sys
+import os
 import warnings
 import numpy as np
 import torch
 
+# 添加父目录到路径，支持直接运行
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from gkp_state import create_gkp_grid
+from noise_model import ExperimentalNoise, calibrate_noise_for_fidelity
+from sparse_sampling import create_sparse_input, generate_training_data
+from cnn_models import build_cnn_committee
+from fidelity import compute_fidelity
 from active_learning import ActiveSparseTomography
+
 
 warnings.filterwarnings("ignore")
 
@@ -39,7 +50,7 @@ def main():
         initial_ratio=0.03,          # 初始3%采样
         add_ratio=0.015,             # 每轮增加1.5%
         max_rounds=30,               # 最多30轮
-        epochs=50,                   # 50个epoch
+        epochs=30,                   # 50个epoch
         lr=2e-3,                     # 学习率
         target_delta=0.3,            # GKP参数
         noise_params=noise_params,   # 实验噪声
