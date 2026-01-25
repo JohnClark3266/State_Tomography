@@ -143,13 +143,14 @@ class MatlabBridge:
             print(f"✗ 发送失败: {e}")
             return False
     
-    def receive(self, name: str, workspace: str = 'base') -> Optional[np.ndarray]:
+    def receive(self, name: str, workspace: str = 'base', silent: bool = False) -> Optional[np.ndarray]:
         """
         从 MATLAB 接收矩阵
         
         参数:
             name: MATLAB 中的变量名
             workspace: 工作空间
+            silent: 是否静默模式 (不打印错误)
         
         返回:
             NumPy 数组，失败返回 None
@@ -159,7 +160,8 @@ class MatlabBridge:
             result = bridge.receive('result')
         """
         if not self.is_connected:
-            print("✗ 未连接到 MATLAB")
+            if not silent:
+                print("✗ 未连接到 MATLAB")
             return None
         
         try:
@@ -172,11 +174,13 @@ class MatlabBridge:
             # 更新共享变量
             self._shared_vars[name] = data.copy()
             
-            print(f"✓ 已接收 '{name}' 从 MATLAB ({data.shape})")
+            if not silent:
+                print(f"✓ 已接收 '{name}' 从 MATLAB ({data.shape})")
             return data
             
         except Exception as e:
-            print(f"✗ 接收失败: {e}")
+            if not silent:
+                print(f"✗ 接收失败: {e}")
             return None
     
     def sync(self, name: str, data: np.ndarray = None) -> Optional[np.ndarray]:

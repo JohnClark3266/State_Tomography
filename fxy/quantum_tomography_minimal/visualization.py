@@ -44,6 +44,9 @@ def plot_all_results(tomo, save_dir="results"):
     # 图6: 采样密度热力图
     plot_sampling_density(tomo, save_dir)
     
+    # 图7: 理论态Wigner函数 (参考)
+    plot_theoretical_state(tomo, save_dir)
+    
     print(f"\n所有结果图已保存到 {save_dir}/")
 
 
@@ -51,9 +54,9 @@ def plot_sampling_distribution(tomo, save_dir):
     """图1: 采样分布（每轮新增点用不同颜色）"""
     fig, ax = plt.subplots(figsize=(10, 9))
     
-    # 半透明理论态衬底
-    vmax = np.max(np.abs(tomo.ideal_wigner))
-    ax.contourf(tomo.X, tomo.P, tomo.ideal_wigner, levels=40, 
+    # 半透明实验态衬底 (作为真实参考)
+    vmax = np.max(np.abs(tomo.exp_wigner))
+    ax.contourf(tomo.X, tomo.P, tomo.exp_wigner, levels=40, 
                 cmap='RdBu_r', alpha=0.3, vmin=-vmax, vmax=vmax)
     
     # 为每轮采样点分配不同颜色
@@ -118,16 +121,9 @@ def plot_fidelity_curves(tomo, save_dir):
     
     # 左轴: 保真度
     # F(重构 vs 实验) - 实线点
+    # F(重构 vs 实验) - 实线点
     line1, = ax1.plot(x_vals, tomo.history['F_recon_vs_exp'], 'b-o', 
-                       linewidth=2, markersize=6, label='F(重构 vs MATLAB)')
-    
-    # F(重构 vs 理论) - 实线三角
-    line2, = ax1.plot(x_vals, tomo.history['F_recon_vs_ideal'], 'g-^', 
-                       linewidth=2, markersize=6, label='F(重构 vs Python)')
-    
-    # F(实验 vs 理论) - 虚线
-    ax1.axhline(y=tomo.F_exp_vs_ideal, color='r', linestyle='--', 
-               linewidth=2, label=f'F(exp vs ideal) = {tomo.F_exp_vs_ideal:.4f}')
+                       linewidth=2, markersize=6, label='F(Recon vs MATLAB)')
     
     # 目标线
     ax1.axhline(y=tomo.F_threshold, color='gray', linestyle=':', 
@@ -149,7 +145,7 @@ def plot_fidelity_curves(tomo, save_dir):
         ax2.set_yscale('log')  # 对数刻度更易观察
         
         # 合并图例
-        lines = [line1, line2, line3]
+        lines = [line1, line3]
         labels = [l.get_label() for l in lines]
         ax1.legend(lines, labels, loc='center right', fontsize=9)
     else:
@@ -174,15 +170,17 @@ def plot_reconstruction(tomo, save_dir):
               (0.75, 'red'), (1.0, 'darkred')]
     cmap = LinearSegmentedColormap.from_list('wigner_cmap', colors)
     
-    vmax = max(np.max(np.abs(tomo.final_pred)), np.max(np.abs(tomo.exp_wigner)))
+    # 图颜色基于数据范围，但 colorbar 固定为 [-1, 1]
+    vmax_data = max(np.max(np.abs(tomo.final_pred)), np.max(np.abs(tomo.exp_wigner)))
     cf = ax.contourf(tomo.X, tomo.P, tomo.final_pred, levels=50, 
-                     cmap=cmap, vmin=-vmax, vmax=vmax)
+                     cmap=cmap, vmin=-vmax_data, vmax=vmax_data)
     cbar = plt.colorbar(cf, ax=ax)
     cbar.set_label('W(x, p)', fontsize=11)
+    cbar.mappable.set_clim(-1, 1)  # colorbar 显示范围固定为 [-1, 1]
     
     ax.set_xlabel("Re(alpha)", fontsize=12)
     ax.set_ylabel("Im(alpha)", fontsize=12)
-    ax.set_title(f"Reconstructed Wigner Function\\nF = {tomo.final_F_exp:.4f}", 
+    ax.set_title(f"Reconstructed Wigner Function\nF = {tomo.final_F_exp:.4f}", 
                 fontsize=14, fontweight='bold')
     ax.set_aspect('equal')
     
@@ -202,16 +200,17 @@ def plot_experimental_state(tomo, save_dir):
               (0.75, 'red'), (1.0, 'darkred')]
     cmap = LinearSegmentedColormap.from_list('wigner_cmap', colors)
     
-    vmax = np.max(np.abs(tomo.exp_wigner))
+    # 图颜色基于数据范围，但 colorbar 固定为 [-1, 1]
+    vmax_data = np.max(np.abs(tomo.exp_wigner))
     cf = ax.contourf(tomo.X, tomo.P, tomo.exp_wigner, levels=50, 
-                     cmap=cmap, vmin=-vmax, vmax=vmax)
+                     cmap=cmap, vmin=-vmax_data, vmax=vmax_data)
     cbar = plt.colorbar(cf, ax=ax)
     cbar.set_label('W(x, p)', fontsize=11)
+    cbar.mappable.set_clim(-1, 1)  # colorbar 显示范围固定为 [-1, 1]
     
     ax.set_xlabel("Re(alpha)", fontsize=12)
     ax.set_ylabel("Im(alpha)", fontsize=12)
-    ax.set_title(f"Experimental Wigner Function: {tomo.state_name}\\n"
-                f"F(exp vs ideal) = {tomo.F_exp_vs_ideal:.4f}", 
+    ax.set_title(f"Experimental Wigner Function: {tomo.state_name}", 
                 fontsize=14, fontweight='bold')
     ax.set_aspect('equal')
     
@@ -222,55 +221,66 @@ def plot_experimental_state(tomo, save_dir):
     plt.close()
 
 
+def plot_theoretical_state(tomo, save_dir):
+    """图7: 理论态Wigner函数 (Python生成，仅供参考)"""
+    fig, ax = plt.subplots(figsize=(10, 9))
+    
+    # 自定义colormap
+    colors = [(0.0, 'darkblue'), (0.25, 'blue'), (0.5, 'white'), 
+              (0.75, 'red'), (1.0, 'darkred')]
+    cmap = LinearSegmentedColormap.from_list('wigner_cmap', colors)
+    
+    vmax = np.max(np.abs(tomo.ideal_wigner))
+    cf = ax.contourf(tomo.X, tomo.P, tomo.ideal_wigner, levels=50, 
+                     cmap=cmap, vmin=-vmax, vmax=vmax)
+    cbar = plt.colorbar(cf, ax=ax)
+    cbar.set_label('W(x, p)', fontsize=11)
+    
+    ax.set_xlabel("Re(alpha)", fontsize=12)
+    ax.set_ylabel("Im(alpha)", fontsize=12)
+    ax.set_title(f"Theoretical Wigner Function (Python/QuTiP Reference)\n{tomo.state_name}", 
+                fontsize=14, fontweight='bold')
+    ax.set_aspect('equal')
+    
+    plt.tight_layout()
+    filepath = f"{save_dir}/7_theoretical_state_ref.png"
+    plt.savefig(filepath, dpi=300)
+    print(f"保存: {filepath}")
+    plt.close()
 def plot_relative_error(tomo, save_dir):
-    """图5: 绝对误差 (比相对误差更有意义)"""
-    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+    """图5: 差值分布 (Reconstruction - Experimental) / 1"""
+    fig, ax = plt.subplots(figsize=(10, 9))
     
-    # 计算误差
-    error = tomo.final_pred - tomo.exp_wigner
-    abs_error = np.abs(error)
+    # 计算差值: (图3 - 图4) / 1
+    difference = (tomo.final_pred - tomo.exp_wigner) / 1.0
     
-    # 左图: 绝对误差
-    ax1 = axes[0]
-    vmax_err = np.max(abs_error)
-    cf1 = ax1.contourf(tomo.X, tomo.P, abs_error, levels=50, cmap='hot')
-    cbar1 = plt.colorbar(cf1, ax=ax1)
-    cbar1.set_label('Absolute Error', fontsize=11)
+    # 自定义colormap: 负值蓝色，零值白色，正值红色
+    colors = [(0.0, 'darkblue'), (0.25, 'blue'), (0.5, 'white'), 
+              (0.75, 'red'), (1.0, 'darkred')]
+    cmap = LinearSegmentedColormap.from_list('wigner_cmap', colors)
     
-    ax1.set_xlabel("x (Re direction)", fontsize=12)
-    ax1.set_ylabel("p (Im direction)", fontsize=12)
-    ax1.set_title("Absolute Error: |W_recon - W_target|", fontsize=14, fontweight='bold')
-    ax1.set_aspect('equal')
+    # 图颜色基于数据范围
+    vmax_data = np.max(np.abs(difference))
+    cf = ax.contourf(tomo.X, tomo.P, difference, levels=50, 
+                     cmap=cmap, vmin=-vmax_data, vmax=vmax_data)
+    cbar = plt.colorbar(cf, ax=ax)
+    cbar.set_label('Difference', fontsize=11)
+    cbar.mappable.set_clim(-1, 1)  # colorbar 显示范围固定为 [-1, 1]
+    
+    ax.set_xlabel("Re(alpha)", fontsize=12)
+    ax.set_ylabel("Im(alpha)", fontsize=12)
     
     # 添加统计信息
-    mean_abs = np.mean(abs_error)
-    max_abs = np.max(abs_error)
-    ax1.text(0.02, 0.98, f"Mean: {mean_abs:.4f}\nMax: {max_abs:.4f}",
-            transform=ax1.transAxes, fontsize=10, verticalalignment='top',
-            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-    
-    # 右图: 有符号误差 (正/负)
-    ax2 = axes[1]
-    vmax = max(np.max(error), -np.min(error))
-    cf2 = ax2.contourf(tomo.X, tomo.P, error, levels=50, cmap='RdBu_r', 
-                        vmin=-vmax, vmax=vmax)
-    cbar2 = plt.colorbar(cf2, ax=ax2)
-    cbar2.set_label('Signed Error', fontsize=11)
-    
-    ax2.set_xlabel("x (Re direction)", fontsize=12)
-    ax2.set_ylabel("p (Im direction)", fontsize=12)
-    ax2.set_title("Signed Error: W_recon - W_target", fontsize=14, fontweight='bold')
-    ax2.set_aspect('equal')
-    
-    # RMS 误差
-    rms = np.sqrt(np.mean(error**2))
-    ax2.text(0.02, 0.98, f"RMS: {rms:.4f}",
-            transform=ax2.transAxes, fontsize=10, verticalalignment='top',
-            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    mean_diff = np.mean(difference)
+    max_diff = np.max(np.abs(difference))
+    rms = np.sqrt(np.mean(difference**2))
+    ax.set_title(f"Difference: (Reconstruction - Experimental) / 1\nRMS = {rms:.4f}, Max = {max_diff:.4f}", 
+                fontsize=14, fontweight='bold')
+    ax.set_aspect('equal')
     
     plt.tight_layout()
     filepath = f"{save_dir}/5_relative_error.png"
-    plt.savefig(filepath, dpi=300, bbox_inches='tight')
+    plt.savefig(filepath, dpi=300)
     print(f"保存: {filepath}")
     plt.close()
 
@@ -300,3 +310,49 @@ def plot_sampling_density(tomo, save_dir):
     plt.savefig(filepath, dpi=300)
     print(f"保存: {filepath}")
     plt.close()
+
+
+def plot_round_wigner(tomo, round_id, save_dir):
+    """
+    每一轮输出一张当前重构态的 Wigner 函数图 (用户新增请求)
+    """
+    fig, ax = plt.subplots(figsize=(8, 7))
+    
+    # 获取当前的模型平均预测
+    sparse_input = tomo.sampler.get_sparse_input_for_nn()
+    mean_pred, _ = tomo._committee_predict(sparse_input)
+    
+    # 填充已知点
+    mask = tomo.sampler.get_mask_2d()
+    measured = tomo.sampler.get_wigner_2d()
+    mean_pred[mask] = measured[mask]
+    
+    # 自定义 colormap
+    colors = [(0.0, 'darkblue'), (0.25, 'blue'), (0.5, 'white'), 
+              (0.75, 'red'), (1.0, 'darkred')]
+    cmap = LinearSegmentedColormap.from_list('wigner_cmap', colors)
+    
+    vmax_data = max(np.max(np.abs(mean_pred)), 0.1) # 避免全0
+    cf = ax.contourf(tomo.X, tomo.P, mean_pred, levels=50, 
+                     cmap=cmap, vmin=-vmax_data, vmax=vmax_data)
+    cbar = plt.colorbar(cf, ax=ax)
+    cbar.set_label('W(x, p)', fontsize=10)
+    
+    n_sampled = tomo.sampler.get_sampled_count()
+    ratio = tomo.sampler.get_sampling_ratio()
+    
+    ax.set_title(f"Reconstructed Wigner - Round {round_id}\n"
+                 f"Points: {n_sampled} ({ratio*100:.1f}%)", 
+                 fontsize=12, fontweight='bold')
+    ax.set_xlabel("Re(alpha)")
+    ax.set_ylabel("Im(alpha)")
+    ax.set_aspect('equal')
+    
+    # 创建 rounds 子目录
+    rounds_dir = os.path.join(save_dir, "rounds")
+    os.makedirs(rounds_dir, exist_ok=True)
+    
+    filepath = f"{rounds_dir}/round_{round_id:03d}.png"
+    plt.savefig(filepath, dpi=150, bbox_inches='tight')
+    plt.close()
+    # print(f"  -> 已保存轮次图: {filepath}")

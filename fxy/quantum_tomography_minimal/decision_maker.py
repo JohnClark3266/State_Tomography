@@ -18,9 +18,9 @@ class DecisionMaker:
     """采样决策器"""
     
     def __init__(self, grid_size: int = 64, 
-                 variance_weight: float = 0.5,
+                 variance_weight: float = 0.6,
                  gradient_weight: float = 0.3,
-                 origin_weight: float = 0.2):
+                 origin_weight: float = 0.1):
         """
         初始化决策器
         
@@ -95,6 +95,9 @@ class DecisionMaker:
         combined = (self.w_var * var_score + 
                     self.w_grad * grad_score + 
                     self.w_origin * origin_score)
+        
+        # [优化] 加入微小随机噪声以打破平局 (防止在无信息时退化为线性扫描)
+        combined += np.random.normal(0, 1e-6, size=combined.shape)
         
         # 已采样或待采样的点不可选
         unavailable = (current_state != 0)  # 状态不为0的点不可选
