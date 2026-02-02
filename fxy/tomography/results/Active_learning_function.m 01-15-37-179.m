@@ -38,8 +38,7 @@ kappa_2 = 1/T1q;
 kappa_phi2 = 1/T2q - 1/T1q/2;
 nth2 = 0.04;
 
-kappa_phi_additional = kappa_2/2 * real(sqrt((1+1i*chi/kappa_2)^2+...
-    4i*chi*nth2/kappa_2)-1);
+kappa_phi_additional = kappa_2/2*real(sqrt((1+1i*chi/kappa_2)^2+4i*chi*nth2/kappa_2)-1);
 
 kappa_phi_pure = kappa_phi_total - kappa_phi_additional;
 
@@ -57,7 +56,7 @@ eops = {};
 
 alpha_list = py_matrix_coords;
 
-state = 2;
+state = 3;
 
 switch state
     case 1

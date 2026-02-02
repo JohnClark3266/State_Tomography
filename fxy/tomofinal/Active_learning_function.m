@@ -77,6 +77,10 @@ switch state
         rho_target = tensor(g, psi_target);
 end
 
+xvec = linspace(-5, 5, 64);
+yvec = linspace(-5, 5, 64);
+Wigner_target = wignerFunction(psi_target,xvec,yvec,2);
+n = size(py_matrix_state, 2);
 n = size(py_matrix_state, 2);
 
 for i = 1: n
@@ -86,10 +90,6 @@ for i = 1: n
         py_matrix_state(i) = 2;
     end
 end
-
-xvec = linspace(-5, 5, 64);
-yvec = linspace(-5, 5, 64);
-Wigner_target = wignerFunction(psi_target,xvec,yvec,2);
 
 mat_matrix_state = py_matrix_state;
 mat_matrix_wigner = py_matrix_wigner;

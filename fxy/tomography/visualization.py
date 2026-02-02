@@ -111,14 +111,23 @@ def plot_sampling_distribution(tomo, save_dir):
 
 
 def plot_fidelity_curves(tomo, save_dir):
-    """图2: 保真度曲线 (RECON vs EXP) + 委员会最大方差"""
+    """图2: 保真度曲线 + 委员会最大方差"""
     fig, ax1 = plt.subplots(figsize=(12, 7))
     
     x_vals = [r*100 for r in tomo.history['sampling_ratio']]
     
-    # 左轴: 保真度 F(RECON vs EXP)
-    line1, = ax1.plot(x_vals, tomo.history['F_recon_vs_ideal'], 'b-o', 
-                       linewidth=2, markersize=6, label='F(RECON vs EXP)')
+    # 左轴: 保真度
+    # F(重构 vs 实验) - 实线点
+    line1, = ax1.plot(x_vals, tomo.history['F_recon_vs_exp'], 'b-o', 
+                       linewidth=2, markersize=6, label='F(重构 vs MATLAB)')
+    
+    # F(重构 vs 理论) - 实线三角
+    line2, = ax1.plot(x_vals, tomo.history['F_recon_vs_ideal'], 'g-^', 
+                       linewidth=2, markersize=6, label='F(重构 vs Python)')
+    
+    # F(实验 vs 理论) - 虚线
+    ax1.axhline(y=tomo.F_exp_vs_ideal, color='r', linestyle='--', 
+               linewidth=2, label=f'F(exp vs ideal) = {tomo.F_exp_vs_ideal:.4f}')
     
     # 目标线
     ax1.axhline(y=tomo.F_threshold, color='gray', linestyle=':', 
@@ -133,14 +142,14 @@ def plot_fidelity_curves(tomo, save_dir):
     # 右轴: 最大方差
     ax2 = ax1.twinx()
     if 'max_variance' in tomo.history and len(tomo.history['max_variance']) > 0:
-        line2, = ax2.plot(x_vals, tomo.history['max_variance'], 'r-s', 
+        line3, = ax2.plot(x_vals, tomo.history['max_variance'], 'r-s', 
                           linewidth=2, markersize=5, label='Max Variance')
         ax2.set_ylabel("Max Variance", fontsize=12, color='r')
         ax2.tick_params(axis='y', labelcolor='r')
-        ax2.set_yscale('log')
+        ax2.set_yscale('log')  # 对数刻度更易观察
         
         # 合并图例
-        lines = [line1, line2]
+        lines = [line1, line2, line3]
         labels = [l.get_label() for l in lines]
         ax1.legend(lines, labels, loc='center right', fontsize=9)
     else:

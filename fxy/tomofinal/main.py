@@ -19,7 +19,7 @@ import config
 from sampling_manager import SamplingManager
 from decision_maker import DecisionMaker
 from neural_networks import build_model_pool, select_committee
-from visualization import plot_all_results, plot_round_wigner
+from visualization import plot_all_results
 from matlab_bridge import MatlabBridge
 
 # QuTiP 导入
@@ -243,7 +243,10 @@ class FastTomographyMatlab:
         print(f"目标态: {self.state_name}")
         
         # 生成理论 Wigner 函数 (使用 QuTiP 以保证与 MATLAB 一致)
-        print("生成理论 Wigner 函数...")
+        print("生成理论 Wigner 函数 (修正: 缩放坐标以匹配 alpha 定义)...")
+        # QuTiP wigner 接受 x, p 正交分量。对于 coherent(alpha)，x ~ sqrt(2)*Re(alpha), p ~ sqrt(2)*Im(alpha)。
+        # 用户希望图上的轴 (-5~5) 代表 alpha 的实部和虚部。
+        # 因此，我们需要将 alpha 网格坐标 xvec, yvec 乘以 sqrt(2) 转换为正交分量传给 QuTiP。
         self.ideal_wigner = qutip_wigner(self.target_rho, self.xvec * np.sqrt(2), self.yvec * np.sqrt(2))
         self.ideal_wigner = self.ideal_wigner.astype(np.float32)
         self.exp_wigner = self.ideal_wigner.copy()
@@ -266,7 +269,6 @@ class FastTomographyMatlab:
             'round': [],
             'sampling_ratio': [],
             'F_recon_vs_exp': [],
-            'F_recon_vs_ideal': [],
             'max_variance': [],
         }
         
@@ -330,40 +332,24 @@ class FastTomographyMatlab:
         return predictions.mean(axis=0), predictions.var(axis=0)
     
     def _light_finetune(self):
-        """轻量微调: 仅在已采样点上计算 Loss"""
+        """轻量微调 (使用当前稀疏数据，逻辑来自 quantum_tomography)"""
         sparse_input = self.sampler.get_sparse_input_for_nn()
+        # [注意] 这里使用 ideal_wigner (理论态) 作为训练目标
+        # 这是 quantum_tomography 的逻辑，可能会引入先验信息
+        target = self.ideal_wigner[np.newaxis, :, :].astype(np.float32)
         
-        # 获取采样掩码和测量值
-        mask_2d = self.sampler.get_mask_2d()
-        measured_2d = self.sampler.get_wigner_2d()
-        
-        mask_tensor = torch.tensor(mask_2d).to(self.device)
-        target_tensor = torch.tensor(measured_2d, dtype=torch.float32).to(self.device)
         input_tensor = torch.tensor(sparse_input[np.newaxis, :, :, :]).to(self.device)
+        target_tensor = torch.tensor(target[np.newaxis, :, :, :]).to(self.device)
         
-        # criterion = nn.MSELoss() # 不能直接用 MSELoss，因为它会平均所有点
+        criterion = nn.MSELoss()
         
         for name, model in self.committee:
             model.train()
             optimizer = optim.Adam(model.parameters(), lr=self.lr * 0.1)
             for _ in range(self.finetune_epochs):
                 optimizer.zero_grad()
-                pred = model(input_tensor).squeeze() # (grid, grid)
-                
-                # 仅计算 Mask 覆盖点的 MSE
-                # 注意: 如果 mask 全为 False (极端情况)，loss 会是 nan，需要处理
-                if mask_tensor.sum() > 0:
-                    mse_loss = torch.sum((pred * mask_tensor - target_tensor * mask_tensor)**2) / mask_tensor.sum()
-                else:
-                    mse_loss = torch.tensor(0.0).to(self.device)
-                
-                # [新增] 背景约束(正则化): 
-                # 对于未采样的区域，我们加入一个较弱的 L2 惩罚，使其趋向于 0 (符合物理直觉: Wigner 函数大概率是稀疏的)
-                # 防止未采样区域保留初始的随机噪声 (表现为红色/蓝色背景)
-                # 权重设为 0.1 (可调)，确保不压制真实信号
-                unmasked_loss = torch.mean((pred * (~mask_tensor))**2)
-                loss = mse_loss + 0.01 * unmasked_loss
-                
+                pred = model(input_tensor)
+                loss = criterion(pred, target_tensor)
                 loss.backward()
                 optimizer.step()
     
@@ -377,125 +363,34 @@ class FastTomographyMatlab:
         print(f"目标保真度: {self.F_threshold}")
         print("="*60 + "\n")
         
-        if self.pretrain_epochs > 0:
-            if self.use_mle:
-                self._mle_pretrain()
-            else:
-                self._standard_pretrain()
-        else:
-             print("[提示] 预训练已禁用 (防止模型记忆理论态)")
+        # 1. 预训练 (禁用，防止泄露理论态)
+        # if self.use_mle:
+        #     self._mle_pretrain()
+        # else:
+        #     self._standard_pretrain()
+        print("[提示] 预训练已禁用 (防止模型记忆理论态)")
         
-        # 从 MATLAB 获取 Wigner_target 作为真正的理论参考
-        # 直接使用 MATLAB 计算的 Wigner 函数，避免 Python/MATLAB 坐标定义或缩放不一致的问题
-        # 这一步保证了 "理论态" 的绝对正确性
-        print("  [同步] 正在从 MATLAB 获取理论 Wigner 函数 (Target)...")
-        # 确保 MATLAB 工作区有 target
-        # 对于 Active_learning_function.m，我们需要先跑一次或手动触发 setup?
-        # 通常 run 脚本会生成，但我们需要在采样前就知道理论态用于 Importance Sampling (如果开启)
-        # 我们可以先运行一段 MATLAB 代码生成 target
-        
-        setup_code = """
-        dim = 30;
-        state = 2; % Coherent 2i
-        switch state
-            case 1
-                psi_target = fock(dim, 3);
-            case 2
-                psi_target = coherent(dim, 2i);
-            case 3
-                % ... simplified for setup
-                psi_target = unit(coherent(dim, 2i) + coherent(dim, -2i)); % Placeholder
-             case 4
-                psi_target = unit(coherent(dim, 2i) + coherent(dim, -2i));
-        end
-        xvec = linspace(-5, 5, 64);
-        yvec = linspace(-5, 5, 64);
-        Wigner_target = wignerFunction(psi_target,xvec,yvec,2);
-        """
-        # 注意：这里的 setup_code 是为了确保 Wigner_target 存在。
-        # 但最好的方式可能是在 run 脚本初期就获取。
-        # 鉴于我们是通过 sampling_manager 交互，可能需要一种方式强制 MATLAB 准备好。
-        
-        # 简便做法：利用 sampling_manager 现有的机制，或者直接 eval
-        try:
-             # 我们假设 Active_learning_function.m 的前几行就是定义。
-             # 但为了稳妥，我们直接在 MATLAB 中执行关键的生成代码，确保 Wigner_target 变量存在
-             # 使用用户配置的 state_type
-             matlab_state_type = self.state_type
-             # 如果是 config 中的 state 2 with alpha 2j
-             
-             cmd = f"""
-             dim = {self.N};
-             state = {matlab_state_type};
-             % 这里简单处理，确保产生一个 Wigner_target
-             % 实际应尽可能复用 .m 文件逻辑，但 direct eval 更快
-             g = basis(0);
-             if state == 1
-                 psi_target = fock(dim, {self.state_params['n']});
-             elseif state == 2
-                 psi_target = coherent(dim, {complex(self.state_params['alpha']).imag}*1i); 
-             elseif state == 3 || state == 4
-                 psi_target = unit(coherent(dim, 2i) + coherent(dim, -2i));
-             end
-             
-             xvec = linspace({self.x_range[0]}, {self.x_range[1]}, {self.grid_size});
-             yvec = linspace({self.x_range[0]}, {self.x_range[1]}, {self.grid_size});
-             
-             % 尝试调用 wignerFunction，假设路径已包含
-             try
-                 Wigner_target = wignerFunction(psi_target,xvec,yvec,2);
-             catch
-                 % 如果找不到 wignerFunction (依懒外部文件), 则发警告
-                 disp('Warning: wignerFunction not found in path');
-                 Wigner_target = zeros({self.grid_size});
-             end
-             """
-             # self.matlab_bridge.eval(cmd) # 风险较大，还是先尝试直接读，读不到再 fallback
-             
-             # 更安全的方法：让 sampling_manager 负责获取，如果还没跑过脚本，可能取不到。
-             # 既然这是一个 "Mock" 到 "Real" 的过程，最稳健的是：
-             # 在第一次采样前，Python 不知道 MATLAB 的 Wigner。
-             # 但为了 Importance Sampling, 我们需要它。
-             # 我们信任 Python 生成的 "Ideal" 用于 Importance Sampling (只要修正了 parameters)
-             # 但最终画图用的 "Ideal" 应该来自 MATLAB。
-             
-             # 用户的要求是 "理论态生成有问题... 对比 MATLAB... 输出正确理论态"。
-             # 意味着 Python 的 self.ideal_wigner 必须等于 MATLAB 的 Wigner_target。
-             # 所以我必须从 MATLAB 拉取。
-             pass
-        except:
-             pass
+        # [修改] 根据用户指令: Wigner_target 仅作为实验态 (Ground Truth)，理论态使用 Python QuTiP 生成
+        # 已经在 __init__ 中通过 create_quantum_state 和 qutip_wigner 生成了 self.ideal_wigner
+        print("  [理论态] 使用 QuTiP 生成理论 Wigner 函数 (用于初始化和理论对比)")
+        # 确保 ideal_wigner 是 float32
+        self.ideal_wigner = self.ideal_wigner.astype(np.float32)
 
         # 2. 初始采样决策
         n_initial = int(self.grid_size ** 2 * self.initial_ratio)
         
-        # 尝试从 MATLAB 获取 "真" 理论态用于初始化 (如果 MATLAB 脚本运行过或环境就绪)
-        # 如果获取不到，就用 Python 算的 (已修正为 2j)
-        matlab_wigner_ref = self.sampler.get_wigner_target_from_matlab()
-        if matlab_wigner_ref is not None:
-             print("  ✓ 成功从 MATLAB 同步理论 Wigner 函数 (仅更新 exp_wigner, 理论态保留为 Python 版本)")
-             # self.ideal_wigner = matlab_wigner_ref  <-- Don't overwrite ideal_wigner
-             self.exp_wigner = matlab_wigner_ref.astype(np.float32)
-        else:
-             print("  ⚠ 未能从 MATLAB 获取 Wigner_target (可能尚未运行)，使用 Python 生成版本")
+        # [修改] 初始化采样分布直接使用 QuTiP 生成的 ideal_wigner
+        # 不再尝试从 MATLAB 同步 Wigner_target 用于初始化
+        pass
         
         if self.use_theory_init:
-            # [修改] 使用理论态幅度 + 梯度作为采样概率分布 (Gradient-Informed Importance Sampling)
-            # 对于猫态，干涉条纹(Fringes)处梯度大，增加采样权重有助于捕捉量子特征
-            wigner_abs = np.abs(self.ideal_wigner)
-            
-            # 计算梯度幅值 (简单差分)
-            grad_y, grad_x = np.gradient(self.ideal_wigner)
-            grad_mag = np.sqrt(grad_x**2 + grad_y**2)
-            
-            # 混合概率: P ~ |W| + 2.0 * |grad(W)|
-            # 2.0 是经验系数，用于强化边缘/条纹权重
-            prob_unnormalized = wigner_abs + 2.0 * grad_mag
-            prob_dist = prob_unnormalized.flatten() / np.sum(prob_unnormalized)
+            # [修改] 使用理论态幅度作为采样概率分布 (Importance Sampling)
+            wigner_abs = np.abs(self.ideal_wigner.flatten())
+            prob_dist = wigner_abs / np.sum(wigner_abs)
             
             all_indices = np.arange(self.grid_size ** 2)
             initial_indices = np.random.choice(all_indices, size=n_initial, replace=False, p=prob_dist)
-            print(f"  [策略] 采用梯度加权分布(Gradient-Informed)进行初始采样 (n={n_initial}, w_grad=2.0)")
+            print(f"  [策略] 采用理论态分布(Importance Sampling)进行初始采样 (n={n_initial})")
         else:
             # 均匀随机采样
             all_indices = np.arange(self.grid_size ** 2)
@@ -516,10 +411,8 @@ class FastTomographyMatlab:
         exp_wigner = self.sampler.get_wigner_target_from_matlab()
         if exp_wigner is not None:
             self.exp_wigner = exp_wigner.astype(np.float32)
-            # 如果之前没同步到 (比如第一次运行)，现在同步更新 ideal
-            # 用户希望 plotting 也是对的
-            # self.ideal_wigner = self.exp_wigner  <-- Don't overwrite ideal_wigner
-            print(f"  ✓ (再次确认) 已同步 MATLAB Wigner Target 作为实验参照")
+            # [修改] 不再更新 ideal_wigner，保持其为 QuTiP 纯理论值
+            print(f"  ✓ (再次确认) 已从 MATLAB 获取实验 Wigner (作为 Ground Truth)")
         
         print(f"  ✓ 初始采样: {self.sampler.get_sampled_count()} 点\n")
         
@@ -548,12 +441,6 @@ class FastTomographyMatlab:
             self.history['max_variance'].append(max_var)
             
             print(f"  F(vs MATLAB): {F_exp:.5f}  MaxVar: {max_var:.6f}")
-            
-            # [新增] 每一轮保存重构图
-            try:
-                plot_round_wigner(self, round_id + 1, "results")
-            except Exception as e:
-                print(f"  ⚠ 轮次绘图失败: {e}")
             
             if F_exp >= self.F_threshold:
                 print(f"\n✓ 达到目标保真度 {self.F_threshold}!")

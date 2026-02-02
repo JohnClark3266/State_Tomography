@@ -93,6 +93,7 @@ class FastTomographyMatlab:
             'sampling_ratio': [],
             'F_recon_vs_exp': [],
             'F_recon_vs_ideal': [],
+            'max_variance': [],  # 委员会最大方差
         }
         
         self.final_pred = None
@@ -278,12 +279,16 @@ class FastTomographyMatlab:
             F_exp = compute_fidelity(mean_pred, self.exp_wigner)  # vs MATLAB
             F_ideal = compute_fidelity(mean_pred, self.ideal_wigner)  # vs Python
             
+            # 记录委员会最大方差
+            max_var = np.max(variance)
+            
             self.history['round'].append(round_id + 1)
             self.history['sampling_ratio'].append(ratio)
             self.history['F_recon_vs_exp'].append(F_exp)
             self.history['F_recon_vs_ideal'].append(F_ideal)
+            self.history['max_variance'].append(max_var)
             
-            print(f"  F(vs MATLAB): {F_exp:.5f}  F(vs Python): {F_ideal:.5f}")
+            print(f"  F(vs MATLAB): {F_exp:.5f}  F(vs Python): {F_ideal:.5f}  MaxVar: {max_var:.6f}")
             
             # 早停 (使用 MATLAB 保真度作为主要指标)
             if F_exp >= self.F_threshold:
@@ -383,7 +388,7 @@ def main():
     tomo = FastTomographyMatlab(
         grid_size=64,
         state_type=args.state,
-        initial_ratio=0.0073,  # ~30 个初始采样点
+        initial_ratio=0.00244,  # ~10 个初始采样点
         samples_per_round=args.samples,
         max_rounds=args.rounds,
         pretrain_epochs=30,  # 固定为30

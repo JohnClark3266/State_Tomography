@@ -44,6 +44,9 @@ def plot_all_results(tomo, save_dir="results"):
     # 图6: 采样密度热力图
     plot_sampling_density(tomo, save_dir)
     
+    # 图7: 理论态Wigner函数 (参考)
+    plot_theoretical_state(tomo, save_dir)
+    
     print(f"\n所有结果图已保存到 {save_dir}/")
 
 
@@ -51,9 +54,9 @@ def plot_sampling_distribution(tomo, save_dir):
     """图1: 采样分布（每轮新增点用不同颜色）"""
     fig, ax = plt.subplots(figsize=(10, 9))
     
-    # 半透明理论态衬底
-    vmax = np.max(np.abs(tomo.ideal_wigner))
-    ax.contourf(tomo.X, tomo.P, tomo.ideal_wigner, levels=40, 
+    # 半透明实验态衬底 (作为真实参考)
+    vmax = np.max(np.abs(tomo.exp_wigner))
+    ax.contourf(tomo.X, tomo.P, tomo.exp_wigner, levels=40, 
                 cmap='RdBu_r', alpha=0.3, vmin=-vmax, vmax=vmax)
     
     # 为每轮采样点分配不同颜色
@@ -111,14 +114,16 @@ def plot_sampling_distribution(tomo, save_dir):
 
 
 def plot_fidelity_curves(tomo, save_dir):
-    """图2: 保真度曲线 (RECON vs EXP) + 委员会最大方差"""
+    """图2: 保真度曲线 + 委员会最大方差"""
     fig, ax1 = plt.subplots(figsize=(12, 7))
     
     x_vals = [r*100 for r in tomo.history['sampling_ratio']]
     
-    # 左轴: 保真度 F(RECON vs EXP)
-    line1, = ax1.plot(x_vals, tomo.history['F_recon_vs_ideal'], 'b-o', 
-                       linewidth=2, markersize=6, label='F(RECON vs EXP)')
+    # 左轴: 保真度
+    # F(重构 vs 实验) - 实线点
+    # F(重构 vs 实验) - 实线点
+    line1, = ax1.plot(x_vals, tomo.history['F_recon_vs_exp'], 'b-o', 
+                       linewidth=2, markersize=6, label='F(Recon vs MATLAB)')
     
     # 目标线
     ax1.axhline(y=tomo.F_threshold, color='gray', linestyle=':', 
@@ -133,14 +138,14 @@ def plot_fidelity_curves(tomo, save_dir):
     # 右轴: 最大方差
     ax2 = ax1.twinx()
     if 'max_variance' in tomo.history and len(tomo.history['max_variance']) > 0:
-        line2, = ax2.plot(x_vals, tomo.history['max_variance'], 'r-s', 
+        line3, = ax2.plot(x_vals, tomo.history['max_variance'], 'r-s', 
                           linewidth=2, markersize=5, label='Max Variance')
         ax2.set_ylabel("Max Variance", fontsize=12, color='r')
         ax2.tick_params(axis='y', labelcolor='r')
-        ax2.set_yscale('log')
+        ax2.set_yscale('log')  # 对数刻度更易观察
         
         # 合并图例
-        lines = [line1, line2]
+        lines = [line1, line3]
         labels = [l.get_label() for l in lines]
         ax1.legend(lines, labels, loc='center right', fontsize=9)
     else:
@@ -201,8 +206,7 @@ def plot_experimental_state(tomo, save_dir):
     
     ax.set_xlabel("Re(alpha)", fontsize=12)
     ax.set_ylabel("Im(alpha)", fontsize=12)
-    ax.set_title(f"Experimental Wigner Function: {tomo.state_name}\\n"
-                f"F(exp vs ideal) = {tomo.F_exp_vs_ideal:.4f}", 
+    ax.set_title(f"Experimental Wigner Function: {tomo.state_name}", 
                 fontsize=14, fontweight='bold')
     ax.set_aspect('equal')
     
@@ -212,7 +216,35 @@ def plot_experimental_state(tomo, save_dir):
     print(f"保存: {filepath}")
     plt.close()
 
+    plt.close()
 
+
+def plot_theoretical_state(tomo, save_dir):
+    """图7: 理论态Wigner函数 (Python生成，仅供参考)"""
+    fig, ax = plt.subplots(figsize=(10, 9))
+    
+    # 自定义colormap
+    colors = [(0.0, 'darkblue'), (0.25, 'blue'), (0.5, 'white'), 
+              (0.75, 'red'), (1.0, 'darkred')]
+    cmap = LinearSegmentedColormap.from_list('wigner_cmap', colors)
+    
+    vmax = np.max(np.abs(tomo.ideal_wigner))
+    cf = ax.contourf(tomo.X, tomo.P, tomo.ideal_wigner, levels=50, 
+                     cmap=cmap, vmin=-vmax, vmax=vmax)
+    cbar = plt.colorbar(cf, ax=ax)
+    cbar.set_label('W(x, p)', fontsize=11)
+    
+    ax.set_xlabel("Re(alpha)", fontsize=12)
+    ax.set_ylabel("Im(alpha)", fontsize=12)
+    ax.set_title(f"Theoretical Wigner Function (Python/QuTiP Reference)\n{tomo.state_name}", 
+                fontsize=14, fontweight='bold')
+    ax.set_aspect('equal')
+    
+    plt.tight_layout()
+    filepath = f"{save_dir}/7_theoretical_state_ref.png"
+    plt.savefig(filepath, dpi=300)
+    print(f"保存: {filepath}")
+    plt.close()
 def plot_relative_error(tomo, save_dir):
     """图5: 绝对误差 (比相对误差更有意义)"""
     fig, axes = plt.subplots(1, 2, figsize=(16, 7))

@@ -7,8 +7,8 @@
 # =============================================
 # Hilbert 空间参数
 # =============================================
-HILBERT_DIM = 30           # Hilbert 空间截断维度 N
-N_MLE_TRUNC = 30          # MLE 重建用的截断维度 (较小以保证稳定性)
+HILBERT_DIM = 50           # Hilbert 空间截断维度 N
+N_MLE_TRUNC = 20           # MLE 重建用的截断维度 (较小以保证稳定性)
 
 # =============================================
 # 相空间网格参数 (与 MATLAB 同步)
@@ -19,7 +19,7 @@ X_RANGE = (-5, 5)          # 相空间范围 (x 和 p 方向相同)
 # =============================================
 # 量子态参数
 # =============================================
-STATE_TYPE = 2           # 1=Fock态, 2=相干态, 3=猫态
+STATE_TYPE = 2             # 1=Fock态, 2=相干态, 3=猫态
 STATE_PARAMS = {
     'alpha': 2j,           # 相干态/猫态振幅
     'n': 3,                # Fock态光子数
@@ -29,29 +29,30 @@ STATE_PARAMS = {
 # =============================================
 # 采样参数
 # =============================================
-INITIAL_RATIO = 0.005    # 初始采样比例 (~10 点)
-SAMPLES_PER_ROUND = 20     # 每轮增加的采样点数
-MAX_ROUNDS = 30            # 最大轮数
+INITIAL_RATIO = 0.00244    # 初始采样比例 (~10 点)
+SAMPLES_PER_ROUND = 10     # 每轮增加的采样点数
+MAX_ROUNDS = 3             # 最大轮数
 NOISE_STD = 0.006          # MATLAB 采样噪声标准差
 
 # MATLAB 脚本路径
-MATLAB_SCRIPT_PATH = '/Users/akane_oimo/Documents/py/fxy/quantum_tomography_minimal/Active_learning_function.m'
+import os
+MATLAB_SCRIPT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Active_learning_function.m')
 
 # =============================================
 # 神经网络训练参数
 # =============================================
-PRETRAIN_EPOCHS = 50      # 预训练 epochs (Low-Epoch Pretraining)
-FINETUNE_EPOCHS = 30       # 微调 epochs - 稍微增加微调轮数以更好拟合
-LEARNING_RATE = 3e-3       # 学习率 - 稍微调大以加速下降
+PRETRAIN_EPOCHS = 30       # 预训练 epochs
+FINETUNE_EPOCHS = 20       # 微调 epochs
+LEARNING_RATE = 2e-3       # 学习率
 COMMITTEE_SIZE = 5         # 委员会成员数
 
 # =============================================
 # 目标参数
 # =============================================
-F_THRESHOLD = 0.97         # 目标保真度
+F_THRESHOLD = 0.99         # 目标保真度
 
 # =============================================
 # 其他
 # =============================================
-USE_MLE = True            # 是否使用 MLE 初始化
+USE_MLE = False             # 是否使用 MLE 初始化
 RANDOM_SEED = 42           # 随机种子
